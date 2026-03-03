@@ -236,7 +236,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## License
 
 MIT
-
-## Pecron
-
-If anyone from Pecron sees this, I would love to help out or contribute, please feel free to reach out, I really like your products
