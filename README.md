@@ -1,6 +1,6 @@
 # Pecron Battery Monitor
 
-**v0.5.5** · [Changelog](CHANGELOG.md)
+**v0.5.6** · [Changelog](CHANGELOG.md)
 
 Monitor and control Pecron portable power stations from the command line — no phone app required.
 
@@ -66,6 +66,7 @@ python3 pecron_monitor.py --diagnose -v
 ==================================================
 Device: AABBCCDDEEFF
 Connection: LOCAL TCP
+Data Quality: ✅ Full telemetry
 ==================================================
 Battery:       73%
 Voltage:       51.8V
@@ -161,6 +162,10 @@ homeassistant:
 Run with `--homeassistant` or just start normally (auto-detects if enabled). Your Pecron appears in HA with battery sensors, power sensors, remaining time, and AC/DC/UPS switches.
 
 ## Running as a Service
+
+The setup wizard (`--setup`) offers to install a systemd service automatically at the end — it detects your user and install path and handles everything.
+
+To install manually instead:
 
 ```bash
 # 1. Edit pecron-monitor.service — update User, WorkingDirectory, and ExecStart
