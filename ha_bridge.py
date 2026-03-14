@@ -125,7 +125,7 @@ class HomeAssistantBridge:
                 "unique_id": f"pecron_{dk}_voltage",
             })
 
-            # Temperature sensor
+            # Temperature sensor (primary/host pack temp)
             self._pub_config("sensor", dk, "temperature", {
                 "name": "Temperature",
                 "device_class": "temperature",
@@ -134,6 +134,37 @@ class HomeAssistantBridge:
                 "value_template": "{{ value_json.temperature }}",
                 "device": dev_info,
                 "unique_id": f"pecron_{dk}_temperature",
+            })
+
+            # E3800-specific temperature sensors (3 separate sensors)
+            self._pub_config("sensor", dk, "battery_temp", {
+                "name": "Battery Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.battery_temp }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_battery_temp",
+            })
+
+            self._pub_config("sensor", dk, "charging_plate_temp", {
+                "name": "Charging Plate Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.charging_plate_temp }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_charging_plate_temp",
+            })
+
+            self._pub_config("sensor", dk, "inverter_temp", {
+                "name": "Inverter Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.inverter_temp }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_inverter_temp",
             })
 
             # Power in/out sensors
@@ -147,6 +178,28 @@ class HomeAssistantBridge:
                     "device": dev_info,
                     "unique_id": f"pecron_{dk}_{key}",
                 })
+
+            # AC input power sensor (separate from DC)
+            self._pub_config("sensor", dk, "ac_input", {
+                "name": "AC Input Power",
+                "device_class": "power",
+                "unit_of_measurement": "W",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_input_power }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_input",
+            })
+
+            # DC input power sensor (separate from AC)
+            self._pub_config("sensor", dk, "dc_input", {
+                "name": "DC Input Power",
+                "device_class": "power",
+                "unit_of_measurement": "W",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.dc_input_power }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_dc_input",
+            })
 
             # Remaining time sensor
             # Remaining time sensor (H:M)
@@ -249,6 +302,28 @@ class HomeAssistantBridge:
             except (TypeError, ValueError):
                 pass
 
+        # E3800-specific temperature sensors
+        present, v = _get_first_present(SENSOR_FIELDS["battery_temp"])
+        if present:
+            try:
+                cache["battery_temp"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        present, v = _get_first_present(SENSOR_FIELDS["charging_plate_temp"])
+        if present:
+            try:
+                cache["charging_plate_temp"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        present, v = _get_first_present(SENSOR_FIELDS["inverter_temp"])
+        if present:
+            try:
+                cache["inverter_temp"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
         present, v = _get_first_present(SENSOR_FIELDS["total_input_power"])
         if present and (not packet_has_host or float(v) != 0.0):
             try:
@@ -260,6 +335,21 @@ class HomeAssistantBridge:
         if present and (not packet_has_host or float(v) != 0.0):
             try:
                 cache["total_output_power"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        # AC and DC input power (separate sensors for E3800 and others)
+        present, v = _get_first_present(SENSOR_FIELDS["ac_input_power"])
+        if present and (not packet_has_host or float(v) != 0.0):
+            try:
+                cache["ac_input_power"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        present, v = _get_first_present(SENSOR_FIELDS["dc_input_power"])
+        if present and (not packet_has_host or float(v) != 0.0):
+            try:
+                cache["dc_input_power"] = int(float(v))
             except (TypeError, ValueError):
                 pass
 

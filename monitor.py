@@ -517,6 +517,14 @@ class PecronMonitor:
 
     def _evaluate_rules(self, device_key: str, kv: dict, battery_pct: int):
         """Evaluate automation rules against current state."""
+        # Sanity check: prevent rule triggers on invalid data
+        # If battery is -1 or 0 AND voltage is 0, the data is clearly invalid
+        voltage = float(_get_kv(kv, SENSOR_FIELDS["voltage"], 0))
+        if battery_pct <= 0 and voltage == 0:
+            log.debug("Skipping rule evaluation for %s: invalid data (battery=%d%%, voltage=%.1fV)",
+                      device_key, battery_pct, voltage)
+            return
+
         for rule in self.rules:
             if rule.get("device_key") and rule["device_key"] != device_key:
                 continue

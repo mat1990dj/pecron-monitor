@@ -70,15 +70,20 @@ DEFAULT_CONTROLS = {
 # ---------------------------------------------------------------------------
 SENSOR_FIELDS = {
     "battery_percent": [
-        ("battery_percentage",),
         ("host_packet_data_jdb", "host_packet_electric_percentage"),
+        ("battery_percentage",),
     ],
     "voltage": [
         ("host_packet_data_jdb", "host_packet_voltage"),
     ],
     "temperature": [
         ("host_packet_data_jdb", "host_packet_temp"),
+        ("battery_temp",),  # E3800 uses separate temp sensors
     ],
+    # E3800-specific temperature sensors (3 separate sensors)
+    "battery_temp": [("battery_temp",)],
+    "charging_plate_temp": [("charging_plate_temp",)],
+    "inverter_temp": [("inverter_temp",)],
     "charge_status": [
         ("host_packet_data_jdb", "host_packet_status"),
     ],

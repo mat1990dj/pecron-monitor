@@ -159,6 +159,9 @@ TSL_TOP = {
     40: "ac_switch_hm",
     43: "auto_light_flag_as",
     45: "machine_screen_light_as",
+    47: "battery_temp",  # E3800 temperature sensors
+    48: "charging_plate_temp",
+    49: "inverter_temp",
     52: "device_manual",
     100: "high_frequency_reporting",
 }
