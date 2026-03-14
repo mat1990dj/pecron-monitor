@@ -396,11 +396,19 @@ class PecronMonitor:
                 self.last_alert[device_key] = now
                 self._send_alert(device_key, battery_pct, voltage, remain)
 
+    def _get_device_name(self, device_key):
+        """Get human-readable device name from device_key."""
+        for dev in self.devices:
+            if dev.get("device_key") == device_key:
+                return dev.get("device_name", dev.get("name", device_key))
+        return device_key
+
     def _send_alert(self, device_key, battery_pct, voltage, remain_min):
+        device_name = self._get_device_name(device_key)
         msg = (f"⚠️ Pecron Low Battery Alert\n"
+               f"Device: {device_name}\n"
                f"Battery: {battery_pct}%\nVoltage: {voltage:.1f}V\n"
-               f"Remaining: {remain_min // 60}h {remain_min % 60}m\n"
-               f"Device: {device_key}")
+               f"Remaining: {remain_min // 60}h {remain_min % 60}m")
         log.warning(msg)
         alerts = self.config.get("alerts", {})
 
@@ -567,15 +575,43 @@ class PecronMonitor:
 
                 # Execute action
                 target_dk = action.get("device_key", device_key)
+
+                # Safety check: verify target device has the required controls
+                target_device = None
+                for dev in self.devices:
+                    if dev.get("device_key") == target_dk:
+                        target_device = dev
+                        break
+
+                if not target_device:
+                    log.warning("Rule '%s': target device %s not found, skipping", rule.get("name"), target_dk)
+                    continue
+
+                target_controls = target_device.get("controls", {})
+
                 if "set_ac" in action:
-                    self.set_ac(target_dk, action["set_ac"])
-                    log.info("Rule '%s': set AC=%s on %s", rule.get("name"), action["set_ac"], target_dk)
+                    if "ac_switch_hm" in target_controls:
+                        self.set_ac(target_dk, action["set_ac"])
+                        log.info("Rule '%s': set AC=%s on %s", rule.get("name"), action["set_ac"], target_dk)
+                    else:
+                        log.warning("Rule '%s': device %s does not have AC control, skipping action",
+                                    rule.get("name"), target_dk)
+
                 if "set_dc" in action:
-                    self.set_dc(target_dk, action["set_dc"])
-                    log.info("Rule '%s': set DC=%s on %s", rule.get("name"), action["set_dc"], target_dk)
+                    if "dc_switch_hm" in target_controls:
+                        self.set_dc(target_dk, action["set_dc"])
+                        log.info("Rule '%s': set DC=%s on %s", rule.get("name"), action["set_dc"], target_dk)
+                    else:
+                        log.warning("Rule '%s': device %s does not have DC control, skipping action",
+                                    rule.get("name"), target_dk)
+
                 if "set_ups" in action:
-                    self.set_ups(target_dk, action["set_ups"])
-                    log.info("Rule '%s': set UPS=%s on %s", rule.get("name"), action["set_ups"], target_dk)
+                    if "ups_status_hm" in target_controls:
+                        self.set_ups(target_dk, action["set_ups"])
+                        log.info("Rule '%s': set UPS=%s on %s", rule.get("name"), action["set_ups"], target_dk)
+                    else:
+                        log.warning("Rule '%s': device %s does not have UPS control, skipping action",
+                                    rule.get("name"), target_dk)
 
             except Exception as e:
                 log.error("Rule evaluation error: %s", e)
