@@ -251,6 +251,173 @@ class HomeAssistantBridge:
                 "unique_id": f"pecron_{dk}_ups",
             })
 
+            # === E3800-specific automation controls ===
+            # These only appear if the device has these capabilities
+            # (HA will just show "unavailable" if the device doesn't report them)
+
+            # Eco/Quiet mode switch
+            self._pub_config("switch", dk, "eco_mode", {
+                "name": "Eco Mode",
+                "icon": "mdi:leaf",
+                "command_topic": f"pecron/{dk}/eco_mode/set",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.eco_quite_mode_as }}",
+                "state_on": "ON", "state_off": "OFF",
+                "payload_on": "ON", "payload_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_eco_mode",
+            })
+
+            # Touch panel lock
+            self._pub_config("switch", dk, "touch_lock", {
+                "name": "Touch Panel Lock",
+                "icon": "mdi:lock",
+                "command_topic": f"pecron/{dk}/touch_lock/set",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.device_touch_locking_as }}",
+                "state_on": "ON", "state_off": "OFF",
+                "payload_on": "ON", "payload_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_touch_lock",
+            })
+
+            # AC charging power level
+            self._pub_config("sensor", dk, "ac_charging_power", {
+                "name": "AC Charging Power Setting",
+                "icon": "mdi:flash",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_charging_power_ios }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_charging_power",
+            })
+
+            # UPS charge threshold
+            self._pub_config("sensor", dk, "ups_charge_threshold", {
+                "name": "UPS Charge Threshold",
+                "icon": "mdi:battery-charging",
+                "unit_of_measurement": "%",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ups_start_charge_value_as }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ups_charge_threshold",
+            })
+
+            # Standby timeout
+            self._pub_config("sensor", dk, "standby_timeout", {
+                "name": "Standby Timeout",
+                "icon": "mdi:timer-sand",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.device_standy_times_as }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_standby_timeout",
+            })
+
+            # Bypass mode
+            self._pub_config("switch", dk, "bypass", {
+                "name": "Bypass Mode",
+                "icon": "mdi:transfer",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.bypass_enable }}",
+                "state_on": "ON", "state_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_bypass",
+            })
+
+            # AC output power sensor
+            self._pub_config("sensor", dk, "ac_output", {
+                "name": "AC Output Power",
+                "device_class": "power",
+                "unit_of_measurement": "W",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_output_power }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_output",
+            })
+
+            # AC output voltage sensor
+            self._pub_config("sensor", dk, "ac_output_voltage", {
+                "name": "AC Output Voltage",
+                "device_class": "voltage",
+                "unit_of_measurement": "V",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_output_voltage }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_output_voltage",
+            })
+
+            # === WB12200 battery management sensors ===
+            self._pub_config("sensor", dk, "charging_limit_voltage", {
+                "name": "Charging Limit Voltage",
+                "device_class": "voltage",
+                "icon": "mdi:battery-charging-high",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.charging_limit_voltage }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_charging_limit_voltage",
+            })
+
+            self._pub_config("sensor", dk, "discharge_limit_voltage", {
+                "name": "Discharge Limit Voltage",
+                "device_class": "voltage",
+                "icon": "mdi:battery-low",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.discharge_limiting_voltage }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_discharge_limit_voltage",
+            })
+
+            self._pub_config("sensor", dk, "charging_current_limit", {
+                "name": "Charging Current Limit",
+                "device_class": "current",
+                "unit_of_measurement": "A",
+                "icon": "mdi:current-dc",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.charging_current_limit }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_charging_current_limit",
+            })
+
+            self._pub_config("sensor", dk, "discharge_current_limit", {
+                "name": "Discharge Current Limit",
+                "device_class": "current",
+                "unit_of_measurement": "A",
+                "icon": "mdi:current-dc",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.discharge_limiting_current }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_discharge_current_limit",
+            })
+
+            self._pub_config("sensor", dk, "battery_heating", {
+                "name": "Battery Heating Mode",
+                "icon": "mdi:radiator",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.battery_heating_mode }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_battery_heating",
+            })
+
+            # Beep/voice switch (WB12200)
+            self._pub_config("switch", dk, "beep", {
+                "name": "Beep/Voice Alert",
+                "icon": "mdi:volume-high",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.beep_voice_us }}",
+                "state_on": "ON", "state_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_beep",
+            })
+
+            # Fault alarm sensor
+            self._pub_config("sensor", dk, "fault_alarm", {
+                "name": "Fault Alarm",
+                "icon": "mdi:alert-circle",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.FAULT_ALARM_ENUM }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_fault_alarm",
+            })
+
         log.info("Published Home Assistant discovery configs")
 
     def _pub_config(self, component: str, dk: str, key: str, config: dict):
@@ -373,6 +540,31 @@ class HomeAssistantBridge:
         _update_switch("ac_switch", "ac_switch")
         _update_switch("dc_switch", "dc_switch")
         _update_switch("ups_mode", "ups_mode")
+
+        # ---- E3800 automation controls ----
+        for field in ("eco_quite_mode_as", "device_touch_locking_as", "bypass_enable"):
+            v = kv.get(field)
+            if v is not None:
+                cache[field] = "ON" if _truthy(v) else "OFF"
+
+        for field in ("ac_charging_power_ios", "ups_start_charge_value_as",
+                       "device_standy_times_as"):
+            v = kv.get(field)
+            if v is not None:
+                cache[field] = v
+
+        # ---- WB12200 battery management ----
+        for field in ("battery_heating_mode", "charging_limit_voltage",
+                       "discharge_limiting_voltage", "charging_current_limit",
+                       "discharge_limiting_current", "FAULT_ALARM_ENUM"):
+            v = kv.get(field)
+            if v is not None:
+                cache[field] = v
+
+        for field in ("beep_voice_us", "battery_indicator_us"):
+            v = kv.get(field)
+            if v is not None:
+                cache[field] = "ON" if _truthy(v) else "OFF"
 
         # AC output sensors
         present, v = _get_first_present(SENSOR_FIELDS["ac_output_power"])
