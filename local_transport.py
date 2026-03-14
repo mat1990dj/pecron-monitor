@@ -157,12 +157,30 @@ TSL_TOP = {
     38: "dc_switch_hm",
     39: "add_bat_status_hm",
     40: "ac_switch_hm",
+    41: "device_mode_info",  # E3800: mode status
+    42: "device_touch_locking_as",  # E3800: touch panel lock
     43: "auto_light_flag_as",
+    44: "eco_quite_mode_as",  # E3800: eco/quiet mode
     45: "machine_screen_light_as",
-    47: "battery_temp",  # E3800 temperature sensors
-    48: "charging_plate_temp",
-    49: "inverter_temp",
+    46: "ups_start_charge_value_as",  # E3800: UPS charge threshold
+    47: "battery_temp",  # E3800: battery temperature
+    48: "charging_plate_temp",  # E3800: charging plate temperature
+    49: "inverter_temp",  # E3800: inverter temperature
+    50: "ac_charging_power_ios",  # E3800: AC charging power level
+    51: "device_standy_times_as",  # E3800/WB12200: standby timeout
     52: "device_manual",
+    55: "dc_charging_power_enable",  # E3800: DC charging enable
+    56: "bypass_enable",  # E3800: bypass enable
+    # WB12200 battery management fields
+    86: "battery_coding_us",
+    87: "beep_voice_us",
+    89: "battery_indicator_us",
+    90: "FAULT_ALARM_ENUM",
+    91: "battery_heating_mode",
+    92: "charging_limit_voltage",
+    93: "discharge_limiting_voltage",
+    94: "charging_current_limit",
+    95: "discharge_limiting_current",
     100: "high_frequency_reporting",
 }
 
@@ -226,6 +244,8 @@ def _fields_to_kv(fields: list) -> dict:
             count = fval
             j = i + 1
             consumed = 0
+            is_array = False  # Track if this struct was handled as an array
+
             while j < len(fields) and consumed < count:
                 sid, stype, sval = fields[j]
                 sub_code = sub_map.get(sid, f"field_{sid}")
@@ -248,6 +268,7 @@ def _fields_to_kv(fields: list) -> dict:
                             k += 1
                         packs.append(pack)
                         kv[code] = packs
+                        is_array = True
                         j = k
                         consumed += 1
                         continue
@@ -257,21 +278,26 @@ def _fields_to_kv(fields: list) -> dict:
                 sub_dict[sub_code] = sval
                 j += 1
                 consumed += 1
-            kv[code] = sub_dict
+
+            # Only set sub_dict if this wasn't an array (which already set kv[code])
+            if not is_array:
+                kv[code] = sub_dict
             i = j
         elif ftype == "BOOL":
             kv[code] = fval
+            i += 1
         elif ftype == "NUM":
             kv[code] = fval
+            i += 1
         elif ftype == "BYTES":
             try:
                 kv[code] = fval.decode("utf-8")
             except Exception:
                 kv[code] = fval.hex()
+            i += 1
         else:
             kv[code] = fval
-
-        i += 1
+            i += 1
 
     return kv
 
@@ -445,7 +471,11 @@ class LocalTransport:
         return cipher.encrypt(pad(data, 16))
 
     def read_status(self) -> dict:
-        """Send read command and return kv dict matching MQTT format."""
+        """Send read command and return kv dict matching MQTT format.
+
+        Some devices (E3800, E3600) send data split across multiple 0x0014 packets.
+        We collect all packets and merge their fields to get complete data.
+        """
         if not self.connected:
             return {}
 
@@ -455,26 +485,55 @@ class LocalTransport:
                 pkt = _ttlv_build_packet(0x0011, b"", self._next_pid())
                 self._sock.sendall(pkt)
 
-                # Read ACK (0x0012) — typically empty encrypted payload
-                resp = self._recv_packet()
-                parsed = _ttlv_parse_packet(resp)
+                # Collect all response packets (some devices send 3-4 packets)
+                all_fields = []
+                packets_read = 0
+                max_packets = 10  # Safety limit
 
-                # Read the actual data response (0x0014)
-                resp2 = self._recv_packet()
-                parsed2 = _ttlv_parse_packet(resp2)
+                # Temporarily reduce socket timeout for faster multi-packet reads
+                original_timeout = self._sock.gettimeout()
+                self._sock.settimeout(2.0)
 
-                payload = parsed2.get("payload", b"")
-                if not payload:
-                    # Maybe the first response was the data
-                    payload = parsed.get("payload", b"")
+                while packets_read < max_packets:
+                    try:
+                        resp = self._recv_packet()
+                        parsed = _ttlv_parse_packet(resp)
+                        cmd = parsed.get("cmd", 0)
 
-                if not payload:
-                    log.warning("No payload in local read response")
+                        # Skip ACK packets (0x0012)
+                        if cmd == 0x0012:
+                            packets_read += 1
+                            continue
+
+                        # Process data packets (0x0014)
+                        if cmd == 0x0014:
+                            payload = parsed.get("payload", b"")
+                            if payload:
+                                decrypted = self._decrypt(payload)
+                                fields = _ttlv_parse_fields(decrypted)
+                                all_fields.extend(fields)
+                                packets_read += 1
+                                log.debug("Read packet %d with %d fields", packets_read, len(fields))
+                        else:
+                            # Unknown command, stop reading
+                            break
+
+                    except socket.timeout:
+                        # No more packets available
+                        break
+                    except Exception as e:
+                        log.debug("Packet read error: %s", e)
+                        break
+
+                # Restore original timeout
+                self._sock.settimeout(original_timeout)
+
+                if not all_fields:
+                    log.warning("No data fields in local read response")
                     return {}
 
-                decrypted = self._decrypt(payload)
-                fields = _ttlv_parse_fields(decrypted)
-                kv = _fields_to_kv(fields)
+                log.debug("Collected %d total fields from %d packets", len(all_fields), packets_read)
+                kv = _fields_to_kv(all_fields)
                 return kv
 
             except Exception as e:

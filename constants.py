@@ -55,11 +55,24 @@ KNOWN_PRODUCTS = {
 # The TSL is fetched dynamically; these are E1500LFP defaults as fallback.
 # ---------------------------------------------------------------------------
 DEFAULT_CONTROLS = {
+    # Common controls (E1500, E2000, E3000, WB12200)
     "ac_switch_hm":           {"id": 40, "type": "BOOL", "desc": "AC output", "access": "RW"},
     "dc_switch_hm":           {"id": 38, "type": "BOOL", "desc": "DC output", "access": "RW"},
     "ups_status_hm":          {"id": 27, "type": "BOOL", "desc": "UPS mode", "access": "RW"},
     "auto_light_flag_as":     {"id": 43, "type": "BOOL", "desc": "Auto screen light", "access": "RW"},
     "machine_screen_light_as":{"id": 45, "type": "ENUM", "desc": "Screen brightness", "access": "RW"},
+    # E3800/E3600-specific controls
+    "eco_quite_mode_as":      {"id": 44, "type": "BOOL", "desc": "Eco/quiet mode", "access": "RW"},
+    "ups_start_charge_value_as": {"id": 46, "type": "INT", "desc": "UPS charge threshold %", "access": "RW"},
+    "ac_charging_power_ios":  {"id": 50, "type": "INT", "desc": "AC charging power", "access": "RW"},
+    "device_touch_locking_as":{"id": 42, "type": "BOOL", "desc": "Touch panel lock", "access": "RW"},
+    "device_standy_times_as": {"id": 51, "type": "INT", "desc": "Standby timeout", "access": "RW"},
+    # WB12200-specific controls
+    "battery_heating_mode":   {"id": 91, "type": "INT", "desc": "Battery heating mode", "access": "RW"},
+    "charging_limit_voltage": {"id": 92, "type": "INT", "desc": "Charging limit voltage", "access": "RW"},
+    "discharge_limiting_voltage": {"id": 93, "type": "INT", "desc": "Discharge limit voltage", "access": "RW"},
+    "charging_current_limit": {"id": 94, "type": "INT", "desc": "Charging current limit", "access": "RW"},
+    "discharge_limiting_current": {"id": 95, "type": "INT", "desc": "Discharge current limit", "access": "RW"},
 }
 
 # ---------------------------------------------------------------------------
@@ -98,4 +111,10 @@ SENSOR_FIELDS = {
     "ac_switch": [("ac_switch_hm",), ("host_packet_data_jdb","host_packet_ac_switch"), ("host_packet_data_jdb","ac_switch")],
     "dc_switch": [("dc_switch_hm",), ("host_packet_data_jdb","host_packet_dc_switch"), ("host_packet_data_jdb","dc_switch")],
     "ups_mode": [("ups_status_hm",), ("host_packet_data_jdb","host_packet_ups_status"), ("host_packet_data_jdb","ups_status")],
+    # WB12200-specific battery management fields
+    "battery_heating_mode": [("battery_heating_mode",)],
+    "charging_limit_voltage": [("charging_limit_voltage",)],
+    "discharge_limiting_voltage": [("discharge_limiting_voltage",)],
+    "charging_current_limit": [("charging_current_limit",)],
+    "discharge_limiting_current": [("discharge_limiting_current",)],
 }
