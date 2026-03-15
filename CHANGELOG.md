@@ -4,13 +4,21 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
-## [0.5.9] — 2026-03-15
+## [0.6.0] — 2026-03-15
+
+### 🎉 E3800LFP Full Telemetry — Data Gap Solved
+Reverse-engineered the Pecron mobile app's communication protocol by capturing Android logcat via ADB. Discovered two critical differences between the app and our monitor:
+
+1. **`high_frequency_reporting=3` (LAN+WiFi)** — We were sending `1` (LAN only), which only enables high-frequency data over local TCP. Mode `3` tells the device to also relay all three packet types through cloud MQTT, including `host_packet_data_jdb` (voltage, current, temperature). This was the root cause of missing telemetry.
+2. **Continuous re-request** — The app re-sends the high-freq request every ~15-20 seconds. We were disabling after 60s. Now we re-request every 20s to match app behavior.
+
+E3800LFP now reliably reports: battery %, voltage, current, temperature, inverter temp, charging plate temp, per-port power breakdown, remaining time — all via cloud MQTT. Local TCP remains available as a separate transport.
 
 ### Fixed
-- **E3800LFP full telemetry now works via cloud MQTT** — Reverse-engineered the Pecron app's communication protocol via Android ADB logcat capture. Two critical discoveries:
-  1. App uses `high_frequency_reporting=3` (LAN+WiFi), we were using `1` (LAN only). Mode 3 triggers the cloud to relay all three packet types including `host_packet_data_jdb` (voltage, current, temp) over MQTT.
-  2. App continuously re-sends the high-freq request every ~15-20s. We were disabling after 60s. Now we re-request every 20s to match app behavior.
-- This should resolve voltage/current/temp data gaps on E3800LFP without needing local TCP or comm port access.
+- **Pack status enum not swapped as battery %** — Status values 0-4 are operational states (no charge, cascade, balance, no connection), not percentages. Only swap when value ≥ 5.
+- **Crash when `charging_pack_status` is a string** (v0.5.8) — E3800 firmware sends pack fields as strings, now safely cast.
+- **Polling interval drift** (v0.5.7) — Cooldown only applies after failed attempts, reduced from 2s to 1s.
+- **EP3000 battery field swap** (v0.5.7) — Auto-detects and corrects `charging_pack_battery`/`charging_pack_status` swap.
 
 ## [0.5.8] — 2026-03-15
 
