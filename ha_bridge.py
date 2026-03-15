@@ -345,6 +345,114 @@ class HomeAssistantBridge:
                 "unique_id": f"pecron_{dk}_ac_output_voltage",
             })
 
+            # DC output power sensor
+            self._pub_config("sensor", dk, "dc_output", {
+                "name": "DC Output Power",
+                "device_class": "power",
+                "unit_of_measurement": "W",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.dc_output_power }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_dc_output",
+            })
+
+            # Remaining charging time
+            self._pub_config("sensor", dk, "remaining_charging_time", {
+                "name": "Remaining Charging Time",
+                "icon": "mdi:battery-clock",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.remain_charging_hm }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_remaining_charging_time",
+            })
+
+            # Total energy (cumulative PV generation)
+            self._pub_config("sensor", dk, "total_energy", {
+                "name": "Total PV Energy",
+                "device_class": "energy",
+                "state_class": "total_increasing",
+                "unit_of_measurement": "kWh",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.total_energy }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_total_energy",
+            })
+
+            # Device status
+            self._pub_config("sensor", dk, "device_status", {
+                "name": "Device Status",
+                "icon": "mdi:battery-sync",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.device_status_hm }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_device_status",
+            })
+
+            # Expansion battery pack status
+            self._pub_config("binary_sensor", dk, "expansion_pack", {
+                "name": "Expansion Pack",
+                "device_class": "connectivity",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.add_bat_status_hm }}",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_expansion_pack",
+            })
+
+            # Auto-dim on idle switch
+            self._pub_config("switch", dk, "auto_dim", {
+                "name": "Auto-Dim on Idle",
+                "icon": "mdi:brightness-auto",
+                "command_topic": f"pecron/{dk}/auto_light_flag_as/set",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.auto_light_flag_as }}",
+                "state_on": "ON", "state_off": "OFF",
+                "payload_on": "ON", "payload_off": "OFF",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_auto_dim",
+            })
+
+            # Screen brightness level
+            self._pub_config("sensor", dk, "screen_brightness", {
+                "name": "Screen Brightness",
+                "icon": "mdi:brightness-6",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.machine_screen_light_as }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_screen_brightness",
+            })
+
+            # AC output voltage setting
+            self._pub_config("sensor", dk, "ac_voltage_setting", {
+                "name": "AC Output Voltage Setting",
+                "icon": "mdi:flash",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_output_voltage_io }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_voltage_setting",
+            })
+
+            # AC output frequency setting
+            self._pub_config("sensor", dk, "ac_frequency_setting", {
+                "name": "AC Output Frequency Setting",
+                "icon": "mdi:sine-wave",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.ac_output_frequency_io }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_ac_frequency_setting",
+            })
+
+            # No-output auto-off timer
+            self._pub_config("sensor", dk, "auto_off_timer", {
+                "name": "No-Output Auto-Off Timer",
+                "icon": "mdi:timer-off",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.noastime_io }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_auto_off_timer",
+            })
+
             # === WB12200 battery management sensors ===
             self._pub_config("sensor", dk, "charging_limit_voltage", {
                 "name": "Charging Limit Voltage",
@@ -505,6 +613,13 @@ class HomeAssistantBridge:
             except (TypeError, ValueError):
                 pass
 
+        v = kv.get("total_energy")
+        if v is not None:
+            try:
+                cache["total_energy"] = round(float(v), 3)
+            except (TypeError, ValueError):
+                pass
+
         # AC and DC input power (separate sensors for E3800 and others)
         # ALWAYS publish input power values (including 0) — 0W is valid, "Unknown" is not
         present, v = _get_first_present(SENSOR_FIELDS["ac_input_power"])
@@ -528,8 +643,16 @@ class HomeAssistantBridge:
             except (TypeError, ValueError):
                 pass
 
+        present, v = _get_first_present(SENSOR_FIELDS["remain_charging_time"])
+        if present and (not packet_has_host or float(v) != 0.0):
+            try:
+                cache["remain_charging_minutes"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
         # Human-friendly remaining time for UI
         cache["remain_hm"] = _fmt_dhm(cache.get("remain_minutes"))
+        cache["remain_charging_hm"] = _fmt_dhm(cache.get("remain_charging_minutes"))
 
         # ---- Switch states ----
         # Some payloads don't include these; cache last known.
@@ -541,15 +664,17 @@ class HomeAssistantBridge:
         _update_switch("ac_switch", "ac_switch")
         _update_switch("dc_switch", "dc_switch")
         _update_switch("ups_mode", "ups_mode")
+        _update_switch("add_bat_status_hm", "add_bat_status_hm")
 
         # ---- E3800 automation controls ----
-        for field in ("eco_quite_mode_as", "device_touch_locking_as", "bypass_enable"):
+        for field in ("eco_quite_mode_as", "device_touch_locking_as", "bypass_enable", "auto_light_flag_as"):
             v = kv.get(field)
             if v is not None:
                 cache[field] = "ON" if _truthy(v) else "OFF"
 
         for field in ("ac_charging_power_ios", "ups_start_charge_value_as",
-                       "device_standy_times_as"):
+                       "device_standy_times_as", "machine_screen_light_as",
+                       "ac_output_voltage_io", "ac_output_frequency_io", "noastime_io"):
             v = kv.get(field)
             if v is not None:
                 cache[field] = v
@@ -582,6 +707,17 @@ class HomeAssistantBridge:
             except (TypeError, ValueError):
                 pass
 
+        present, v = _get_first_present(SENSOR_FIELDS["dc_output_power"])
+        if present:
+            try:
+                cache["dc_output_power"] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        present, v = _get_first_present(SENSOR_FIELDS["device_status_hm"])
+        if present:
+            cache["device_status_hm"] = v
+
         # ---- SOC vs Host % ----
         # Your device alternates two payload shapes:
         #   * host packet (has host_packet_data_jdb.*) -> host %
@@ -608,6 +744,7 @@ class HomeAssistantBridge:
         cache.setdefault("host_percent", None)
         cache.setdefault("soc_percent", None)
         cache.setdefault("remain_hm", _fmt_dhm(cache.get("remain_minutes")))
+        cache.setdefault("remain_charging_hm", _fmt_dhm(cache.get("remain_charging_minutes")))
 
         self.client.publish(f"pecron/{device_key}/state", json.dumps(cache), qos=1, retain=True)
 

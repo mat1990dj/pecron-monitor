@@ -103,6 +103,7 @@ SENSOR_FIELDS = {
     "total_input_power": [("total_input_power",)],
     "total_output_power": [("total_output_power",)],
     "remain_time": [("remain_time",)],
+    "remain_charging_time": [("remain_charging_time",)],
     "ac_output_power": [("ac_data_output_hm", "ac_output_power")],
     "ac_output_voltage": [("ac_data_output_hm", "ac_output_voltage")],
     "dc_output_power": [("dc_data_output_hm", "dc_output_power")],
@@ -111,6 +112,9 @@ SENSOR_FIELDS = {
     "ac_switch": [("ac_switch_hm",), ("host_packet_data_jdb","host_packet_ac_switch"), ("host_packet_data_jdb","ac_switch")],
     "dc_switch": [("dc_switch_hm",), ("host_packet_data_jdb","host_packet_dc_switch"), ("host_packet_data_jdb","dc_switch")],
     "ups_mode": [("ups_status_hm",), ("host_packet_data_jdb","host_packet_ups_status"), ("host_packet_data_jdb","ups_status")],
+    # E3800-specific fields
+    "device_status_hm": [("device_status_hm",)],
+    "add_bat_status_hm": [("add_bat_status_hm",)],
     # WB12200-specific battery management fields
     "battery_heating_mode": [("battery_heating_mode",)],
     "charging_limit_voltage": [("charging_limit_voltage",)],
