@@ -909,12 +909,28 @@ class PecronMonitor:
         poll_interval = self.config.get("poll_interval", 60)
         log.info("Monitoring started (polling every %ds)", poll_interval)
 
+        # Enable high-frequency MQTT reporting on all devices for fast initial data fill.
+        # The E3800 sends telemetry in 3 alternating MQTT packet shapes — with normal
+        # reporting (~60s interval), it takes ~3 min to see all shapes. High-freq gets
+        # a complete picture in ~30 seconds. We disable it after 60s to be polite to
+        # Pecron's cloud infrastructure.
+        self._enable_high_freq_reporting()
+
         time.sleep(3)
         self._request_status()
+
+        high_freq_start = time.time()
+        high_freq_active = True
 
         try:
             while self._running:
                 time.sleep(poll_interval)
+
+                # Disable high-freq reporting after 60s warm-up period
+                if high_freq_active and (time.time() - high_freq_start) >= 60:
+                    self._disable_high_freq_reporting()
+                    high_freq_active = False
+
                 if self._token_needs_refresh():
                     log.info("Refreshing token...")
                     try:
@@ -936,6 +952,26 @@ class PecronMonitor:
                 self.mqtt_client.disconnect()
             if self.ha_bridge:
                 self.ha_bridge.disconnect()
+
+    def _enable_high_freq_reporting(self):
+        """Enable high-frequency MQTT reporting on all devices for fast cache warm-up."""
+        for d in self.devices:
+            dk = d["device_key"]
+            try:
+                self.send_control(dk, "high_frequency_reporting", 1)
+                log.info("Enabled high-freq reporting for %s", dk)
+            except Exception as e:
+                log.debug("Could not enable high-freq for %s: %s", dk, e)
+
+    def _disable_high_freq_reporting(self):
+        """Disable high-frequency reporting after warm-up period."""
+        for d in self.devices:
+            dk = d["device_key"]
+            try:
+                self.send_control(dk, "high_frequency_reporting", 0)
+                log.info("Disabled high-freq reporting for %s (warm-up complete)", dk)
+            except Exception as e:
+                log.debug("Could not disable high-freq for %s: %s", dk, e)
 
     def _ha_command(self, device_key: str, control: str, on: bool):
         """Handle commands from Home Assistant."""
