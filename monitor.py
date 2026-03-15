@@ -418,13 +418,15 @@ class PecronMonitor:
         if topic_suffix == "bus_" and "data" in payload:
             kv = payload["data"].get("kv", {})
             if kv:
-                # Don't overwrite local data with cloud data from async MQTT thread
+                # Always merge MQTT data with existing local data
+                # This is essential for E3800LFP which sends incomplete local TCP packets
+                # (battery % in one, voltage/temp/power in MQTT cloud data)
                 if device_key in self._local_data_keys:
-                    log.debug("Ignoring CLOUD MQTT data for %s (local data already received this cycle)", device_key)
-                    self._process_data(device_key, kv, source="CLOUD MQTT")  # Still process for logging
+                    log.debug("Merging CLOUD MQTT data with existing local data for %s", device_key)
                 else:
-                    self._merge_device_data(device_key, kv)
-                    self._process_data(device_key, kv, source="CLOUD MQTT")
+                    log.debug("Processing CLOUD MQTT data for %s", device_key)
+                self._merge_device_data(device_key, kv)
+                self._process_data(device_key, kv, source="CLOUD MQTT")
             else:
                 log.debug("bus_ message with empty kv: %s", list(payload["data"].keys()))
         elif topic_suffix == "onl_" and "data" in payload:
@@ -1034,7 +1036,14 @@ class PecronMonitor:
             packs = kv.get("charging_pack_data_jdb", [])
             for i, pack in enumerate(packs):
                 if int(pack.get("charging_pack_status", 4)) != 4:
-                    print(f"Pack {i}:        {pack.get('charging_pack_battery', '?')}% "
+                    # Fallback: some devices report battery % in charging_pack_status instead
+                    pack_battery = pack.get('charging_pack_battery', 0)
+                    if pack_battery == 0:
+                        pack_status = pack.get('charging_pack_status', 0)
+                        if pack_status > 0 and pack_status <= 100:
+                            pack_battery = pack_status
+                            log.debug("Using charging_pack_status (%d%%) as battery for pack %d", pack_status, i)
+                    print(f"Pack {i}:        {pack_battery if pack_battery > 0 else '?'}% "
                           f"{float(pack.get('charging_pack_voltage', 0)):.1f}V")
 
         if not self.latest_data:

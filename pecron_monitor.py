@@ -114,6 +114,24 @@ def main():
         monitor._request_status()
         time.sleep(5)
         for dk, kv in monitor.latest_data.items():
+            # Print human-readable field mappings
+            print(f"\n{'=' * 60}")
+            print(f"Device: {dk}")
+            print(f"{'=' * 60}")
+            print("\nKNOWN FIELDS (from SENSOR_FIELDS mapping):")
+            print(f"{'Field Name':<30} {'Value':<15} Raw Key(s)")
+            print("-" * 60)
+            for field_name, field_paths in SENSOR_FIELDS.items():
+                value = _get_kv(kv, field_paths, None)
+                if value is not None:
+                    # Show the actual path(s) used
+                    path_str = str(field_paths) if isinstance(field_paths, (list, tuple)) else field_paths
+                    print(f"{field_name:<30} {str(value):<15} {path_str}")
+            
+            # Print full raw JSON
+            print(f"\n{'=' * 60}")
+            print("RAW JSON DATA:")
+            print(f"{'=' * 60}")
             print(json.dumps({dk: kv}, indent=2, default=str))
         if not monitor.latest_data:
             print("No data received — device may be offline.")
