@@ -20,7 +20,7 @@ try:
 except ImportError:
     get_auth_key = None
 from constants import REGIONS
-from lan_scan import _setup_lan_discovery
+from lan_scan import _setup_lan_discovery, discover_devices
 
 # Local TCP transport (LAN-first, cloud-fallback)
 try:
@@ -37,20 +37,36 @@ except ImportError:
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
 
-def setup_wizard():
+def setup_wizard(auto=False):
     print("\n🔋 Pecron Monitor Setup\n")
 
-    email = input("Pecron account email: ").strip()
-    password = input("Pecron account password: ").strip()
+    if auto:
+        # Read from environment variables
+        email = os.getenv("PECRON_EMAIL")
+        password = os.getenv("PECRON_PASSWORD")
+        region = os.getenv("PECRON_REGION", "na").strip().lower()
 
-    print("\nRegions:")
-    print("  na — North America")
-    print("  eu — Europe")
-    print("  cn — China")
-    region = input("Region [na]: ").strip().lower() or "na"
-    if region not in REGIONS:
-        print(f"Invalid region '{region}', using 'na'")
-        region = "na"
+        if not email or not password:
+            print("❌ Auto mode requires PECRON_EMAIL and PECRON_PASSWORD environment variables")
+            return
+
+        if region not in REGIONS:
+            print(f"Invalid region '{region}', using 'na'")
+            region = "na"
+
+        print(f"Auto mode: email={email}, region={region}")
+    else:
+        email = input("Pecron account email: ").strip()
+        password = input("Pecron account password: ").strip()
+
+        print("\nRegions:")
+        print("  na — North America")
+        print("  eu — Europe")
+        print("  cn — China")
+        region = input("Region [na]: ").strip().lower() or "na"
+        if region not in REGIONS:
+            print(f"Invalid region '{region}', using 'na'")
+            region = "na"
 
     print("\nTesting login...")
     try:
@@ -67,26 +83,33 @@ def setup_wizard():
     use_manual = False
 
     if account_devices:
-        print(f"Found {len(account_devices)} device(s) on your account:\n")
-        for i, d in enumerate(account_devices, 1):
-            print(f"  {i}. {d['name']}  (dk={d['device_key']})")
-        print(f"  {len(account_devices) + 1}. Skip — enter device key manually instead")
-        print("")
-        default_sel = ",".join(str(i + 1) for i in range(len(account_devices)))
-        choice = input(f"Select devices to monitor (e.g. 1 or 1,2) [{default_sel}]: ").strip() or default_sel
+        if auto:
+            # Auto mode: select all devices
+            print(f"Auto mode: selecting all {len(account_devices)} device(s)")
+            for d in account_devices:
+                devices.append(d)
+                print(f"  ✅ Added: {d['name']} ({d['device_key']})")
+        else:
+            print(f"Found {len(account_devices)} device(s) on your account:\n")
+            for i, d in enumerate(account_devices, 1):
+                print(f"  {i}. {d['name']}  (dk={d['device_key']})")
+            print(f"  {len(account_devices) + 1}. Skip — enter device key manually instead")
+            print("")
+            default_sel = ",".join(str(i + 1) for i in range(len(account_devices)))
+            choice = input(f"Select devices to monitor (e.g. 1 or 1,2) [{default_sel}]: ").strip() or default_sel
 
-        for c in choice.split(","):
-            c = c.strip()
-            try:
-                idx = int(c) - 1
-                if idx == len(account_devices):
-                    use_manual = True
-                elif 0 <= idx < len(account_devices):
-                    d = account_devices[idx]
-                    devices.append(d)
-                    print(f"  ✅ Added: {d['name']} ({d['device_key']})")
-            except ValueError:
-                pass
+            for c in choice.split(","):
+                c = c.strip()
+                try:
+                    idx = int(c) - 1
+                    if idx == len(account_devices):
+                        use_manual = True
+                    elif 0 <= idx < len(account_devices):
+                        d = account_devices[idx]
+                        devices.append(d)
+                        print(f"  ✅ Added: {d['name']} ({d['device_key']})")
+                except ValueError:
+                    pass
     else:
         print("Could not auto-discover devices from your account.")
         use_manual = True
@@ -166,7 +189,7 @@ def setup_wizard():
     if not devices:
         print("⚠️  No devices added. You can add them manually to config.yaml later.")
 
-    # Fetch TSL for each device and cache it
+    # Fetch TSL and auth keys for each device
     print("\n--- Fetching Device Metadata ---")
     for d in devices:
         pk = d["product_key"]
@@ -182,73 +205,122 @@ def setup_wizard():
         except Exception as e:
             print(f" ❌ ({e})")
 
+        # Fetch auth key for all devices
+        if get_auth_key and not d.get("auth_key"):
+            print(f"  Fetching encryption key for {d.get('name', dk)}...", end="", flush=True)
+            try:
+                auth_key = get_auth_key(token_data["token"], REGIONS[region], pk, dk)
+                d["auth_key"] = auth_key
+                print(f" ✅")
+            except Exception as e:
+                print(f" ⚠️  ({e})")
+
     # --- Local / BLE Discovery (optional) ---
     if (HAS_LOCAL or HAS_BLE) and devices:
-        print("\n--- Local Monitoring (optional) ---")
-        print("Monitor your Pecron without internet using WiFi TCP or Bluetooth.\n")
-        print("  WiFi TCP — device and computer on same network (faster)")
-        print("  Bluetooth — no network needed, ~30ft range (great for vanlife)\n")
+        if auto:
+            # Auto mode: run LAN discovery automatically
+            if HAS_LOCAL:
+                print("\n--- Auto-Discovery (LAN) ---")
+                print("Scanning local network for Pecron devices...")
+                discovered = discover_devices(devices, timeout=0.5)
 
-        if HAS_LOCAL:
-            do_lan = input("Scan for devices on WiFi LAN? [Y/n]: ").strip().lower() != "n"
-            if do_lan:
-                devices = _setup_lan_discovery(devices, token_data["token"], REGIONS[region])
-
-            # Manual IP entry for devices that weren't found or skipped
-            print("\n--- Manual LAN IP Entry (optional) ---")
-            for d in devices:
-                if d.get("lan_ip"):
-                    continue  # Already configured
-                manual = input(f"  Enter LAN IP for {d.get('name', d['device_key'])} (or press Enter to skip): ").strip()
-                if manual:
-                    d["lan_ip"] = manual
-                    # Fetch auth key if not already cached
-                    if not d.get("auth_key"):
-                        try:
-                            print(f"  Fetching encryption key...", end="", flush=True)
-                            auth_key = get_auth_key(token_data["token"], REGIONS[region],
-                                                   d["product_key"], d["device_key"])
-                            d["auth_key"] = auth_key
-                            print(f" ✅")
-                        except Exception as e:
-                            print(f" ❌ ({e})")
-
-        if HAS_BLE:
-            do_ble = input("Scan for devices via Bluetooth? [Y/n]: ").strip().lower() != "n"
-            if do_ble:
-                print("  Scanning for Pecron BLE devices...")
-                found = scan_ble_devices(timeout=10.0)
-                if found:
-                    for addr, name in found:
-                        print(f"  Found: {name} @ {addr}")
-                        # Match to configured device by suffix
-                        suffix = name.split("_")[-1] if "_" in name else ""
+                if discovered:
+                    for dk, ip in discovered.items():
                         for d in devices:
-                            if d["device_key"].upper().endswith(suffix):
-                                d["ble_address"] = addr
-                                d["ble"] = True
-                                print(f"    → Matched to {d.get('name', d['device_key'])}")
-                else:
-                    print("  No Pecron BLE devices found nearby.")
-                    print("  Make sure your Pecron is powered on and Bluetooth is enabled.")
+                            if d["device_key"] == dk:
+                                d["lan_ip"] = ip
+                                print(f"  ✅ {d.get('name', dk)} → {ip}")
+                                break
 
-    poll = input("\nPoll interval in seconds [60]: ").strip() or "60"
-    threshold = input("Low battery alert threshold % [20]: ").strip() or "20"
+                # Show summary table
+                print("\n--- Auto-Discovery Summary ---")
+                print(f"{'Device':<30} {'IP Address':<16} {'Auth Key':<10}")
+                print("-" * 60)
+                for d in devices:
+                    name = d.get('name', d['device_key'])[:28]
+                    ip = d.get('lan_ip', 'Not found')
+                    auth = '✅' if d.get('auth_key') else '❌'
+                    print(f"{name:<30} {ip:<16} {auth:<10}")
+        else:
+            print("\n--- Local Monitoring (optional) ---")
+            print("Monitor your Pecron without internet using WiFi TCP or Bluetooth.\n")
+            print("  WiFi TCP — device and computer on same network (faster)")
+            print("  Bluetooth — no network needed, ~30ft range (great for vanlife)\n")
 
-    print("\n--- Telegram Alerts (optional) ---")
-    tg_enabled = input("Enable Telegram alerts? [y/N]: ").strip().lower() == "y"
-    tg_token = tg_chat = ""
-    if tg_enabled:
-        tg_token = input("Bot token: ").strip()
-        tg_chat = input("Chat ID: ").strip()
+            if HAS_LOCAL:
+                do_lan = input("Scan for devices on WiFi LAN? [Y/n]: ").strip().lower() != "n"
+                if do_lan:
+                    devices = _setup_lan_discovery(devices, token_data["token"], REGIONS[region])
 
-    print("\n--- Home Assistant (optional) ---")
-    ha_enabled = input("Enable Home Assistant MQTT bridge? [y/N]: ").strip().lower() == "y"
-    ha_host = ha_user = ha_pw = ""
-    if ha_enabled:
-        ha_host = input("HA MQTT broker host [localhost]: ").strip() or "localhost"
-        ha_user = input("HA MQTT username (optional): ").strip()
-        ha_pw = input("HA MQTT password (optional): ").strip()
+                # Manual IP entry for devices that weren't found or skipped
+                print("\n--- Manual LAN IP Entry (optional) ---")
+                for d in devices:
+                    if d.get("lan_ip"):
+                        continue  # Already configured
+                    manual = input(f"  Enter LAN IP for {d.get('name', d['device_key'])} (or press Enter to skip): ").strip()
+                    if manual:
+                        d["lan_ip"] = manual
+                        # Fetch auth key if not already cached
+                        if not d.get("auth_key"):
+                            try:
+                                print(f"  Fetching encryption key...", end="", flush=True)
+                                auth_key = get_auth_key(token_data["token"], REGIONS[region],
+                                                       d["product_key"], d["device_key"])
+                                d["auth_key"] = auth_key
+                                print(f" ✅")
+                            except Exception as e:
+                                print(f" ❌ ({e})")
+
+            if HAS_BLE:
+                do_ble = input("Scan for devices via Bluetooth? [Y/n]: ").strip().lower() != "n"
+                if do_ble:
+                    print("  Scanning for Pecron BLE devices...")
+                    found = scan_ble_devices(timeout=10.0)
+                    if found:
+                        for addr, name in found:
+                            print(f"  Found: {name} @ {addr}")
+                            # Match to configured device by suffix
+                            suffix = name.split("_")[-1] if "_" in name else ""
+                            for d in devices:
+                                if d["device_key"].upper().endswith(suffix):
+                                    d["ble_address"] = addr
+                                    d["ble"] = True
+                                    print(f"    → Matched to {d.get('name', d['device_key'])}")
+                    else:
+                        print("  No Pecron BLE devices found nearby.")
+                        print("  Make sure your Pecron is powered on and Bluetooth is enabled.")
+
+    if auto:
+        # Auto mode: use defaults
+        poll = "60"
+        threshold = "20"
+        tg_enabled = False
+        tg_token = tg_chat = ""
+        ha_enabled = False
+        ha_host = ha_user = ha_pw = ""
+        print("\n--- Auto mode defaults ---")
+        print(f"  Poll interval: {poll}s")
+        print(f"  Battery alert threshold: {threshold}%")
+        print(f"  Telegram alerts: disabled")
+        print(f"  Home Assistant: disabled")
+    else:
+        poll = input("\nPoll interval in seconds [60]: ").strip() or "60"
+        threshold = input("Low battery alert threshold % [20]: ").strip() or "20"
+
+        print("\n--- Telegram Alerts (optional) ---")
+        tg_enabled = input("Enable Telegram alerts? [y/N]: ").strip().lower() == "y"
+        tg_token = tg_chat = ""
+        if tg_enabled:
+            tg_token = input("Bot token: ").strip()
+            tg_chat = input("Chat ID: ").strip()
+
+        print("\n--- Home Assistant (optional) ---")
+        ha_enabled = input("Enable Home Assistant MQTT bridge? [y/N]: ").strip().lower() == "y"
+        ha_host = ha_user = ha_pw = ""
+        if ha_enabled:
+            ha_host = input("HA MQTT broker host [localhost]: ").strip() or "localhost"
+            ha_user = input("HA MQTT username (optional): ").strip()
+            ha_pw = input("HA MQTT password (optional): ").strip()
 
     config = {
         "email": email, "password": password, "region": region,
@@ -281,10 +353,13 @@ def setup_wizard():
     print(f"\n✅ Config saved to {CONFIG_PATH}")
 
     # --- Systemd service installation (optional) ---
-    _setup_systemd_service()
+    if not auto:
+        _setup_systemd_service()
 
-    print("\nRun 'python pecron_monitor.py' to start monitoring!")
-    print("Run 'python pecron_monitor.py --ac on' to test AC control!")
+        print("\nRun 'python pecron_monitor.py' to start monitoring!")
+        print("Run 'python pecron_monitor.py --ac on' to test AC control!")
+    else:
+        print("\n✅ Auto setup complete!")
 
 
 def _setup_systemd_service():

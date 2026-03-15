@@ -44,6 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description="Pecron Battery Monitor & Controller")
     parser.add_argument("--version", action="version", version=f"pecron-monitor {__version__}")
     parser.add_argument("--setup", action="store_true", help="Run setup wizard")
+    parser.add_argument("--auto", action="store_true", help="Auto mode for setup (reads PECRON_EMAIL, PECRON_PASSWORD, PECRON_REGION from env)")
     parser.add_argument("--local", action="store_true",
                         help="Run in offline/local-only mode (no cloud, uses cached config)")
     parser.add_argument("--no-ble", action="store_true",
@@ -68,7 +69,7 @@ def main():
     )
 
     if args.setup:
-        setup_wizard()
+        setup_wizard(auto=args.auto)
         return
 
     config_path = Path(args.config)
