@@ -65,6 +65,51 @@ class PecronMonitor:
         self._packet_id = (self._packet_id + 1) % 65535
         return self._packet_id
 
+    def _merge_device_data(self, device_key: str, new_kv: dict):
+        """Merge new data into existing device data, preserving non-zero values.
+
+        E3800LFP firmware sends INCOMPLETE packets — one has voltage, another has
+        battery_percentage, another has power data. We must merge ALL packets
+        instead of overwriting, or we lose voltage/temp/power data.
+
+        Args:
+            device_key: Device key to merge data for
+            new_kv: New data dict to merge in
+        """
+        if device_key not in self.latest_data:
+            self.latest_data[device_key] = {}
+        existing = self.latest_data[device_key]
+
+        for key, value in new_kv.items():
+            # Always update if key is new
+            if key not in existing:
+                existing[key] = value
+                continue
+
+            # For nested dicts (like host_packet_data_jdb), merge recursively
+            if isinstance(value, dict) and isinstance(existing.get(key), dict):
+                for sub_k, sub_v in value.items():
+                    # Only overwrite if new value is meaningful (non-zero/non-empty/non-None)
+                    if sub_v is not None and sub_v != 0 and sub_v != "":
+                        existing[key][sub_k] = sub_v
+                    elif sub_k not in existing[key]:
+                        # If sub-key doesn't exist yet, set it even if zero
+                        existing[key][sub_k] = sub_v
+                continue
+
+            # For arrays (like charging_pack_data_jdb), always update
+            if isinstance(value, list):
+                existing[key] = value
+                continue
+
+            # Don't overwrite good data with zero/empty/None
+            # This preserves voltage from packet 1 when packet 2 only has battery_percentage
+            if value is None or value == "" or (isinstance(value, (int, float)) and value == 0):
+                continue  # Keep existing non-zero value
+
+            # Update with new value
+            existing[key] = value
+
     def authenticate(self, force_offline: bool = False):
         """Authenticate and set up transports.
 
@@ -346,7 +391,7 @@ class PecronMonitor:
                     log.debug("Ignoring CLOUD MQTT data for %s (local data already received this cycle)", device_key)
                     self._process_data(device_key, kv, source="CLOUD MQTT")  # Still process for logging
                 else:
-                    self.latest_data[device_key] = kv
+                    self._merge_device_data(device_key, kv)
                     self._process_data(device_key, kv, source="CLOUD MQTT")
             else:
                 log.debug("bus_ message with empty kv: %s", list(payload["data"].keys()))
@@ -709,7 +754,7 @@ class PecronMonitor:
                         kv = ble.read_status()
                         if kv:
                             log.debug("Got status via BLE for %s", dk)
-                            self.latest_data[dk] = kv
+                            self._merge_device_data(dk, kv)
                             self._local_data_keys.add(dk)  # Mark as local data
                             self._process_data(dk, kv, source="BLE")
                             continue
@@ -735,7 +780,7 @@ class PecronMonitor:
                         kv = lt.read_status()
                         if kv:
                             log.debug("Got status via LOCAL TCP for %s", dk)
-                            self.latest_data[dk] = kv
+                            self._merge_device_data(dk, kv)
                             self._local_data_keys.add(dk)  # Mark as local data
                             self._process_data(dk, kv, source="LOCAL TCP")
                             continue
@@ -761,7 +806,7 @@ class PecronMonitor:
                     )
                     if kv:
                         log.info("Got status via REST API for %s", dk)
-                        self.latest_data[dk] = kv
+                        self._merge_device_data(dk, kv)
                         self._process_data(dk, kv, source="REST API")
 
     def _token_needs_refresh(self) -> bool:
@@ -887,7 +932,11 @@ class PecronMonitor:
             self.connect_mqtt()
             time.sleep(3)
         self._request_status()
-        time.sleep(5)
+        # E3800LFP sends data in multiple MQTT packets with different shapes
+        # (voltage in one, battery_percentage in another, power in a third)
+        # Wait longer to collect all packet shapes for complete data
+        log.info("Collecting data (waiting up to 15s for multi-packet devices like E3800)...")
+        time.sleep(15)
 
         for dk, kv in self.latest_data.items():
             remain = int(_get_kv(kv, SENSOR_FIELDS["remain_time"], 0))

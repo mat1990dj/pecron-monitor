@@ -420,6 +420,11 @@ class LocalTransport:
         self._connected = False
         self._encrypted = False
         self._iv = None
+        # Reset read flags for next connection
+        if hasattr(self, '_first_read_done'):
+            delattr(self, '_first_read_done')
+        if hasattr(self, '_retried_read'):
+            delattr(self, '_retried_read')
         if self._sock:
             try:
                 self._sock.close()
@@ -477,12 +482,21 @@ class LocalTransport:
 
         Some devices (E3800, E3600) send data split across multiple 0x0014 packets.
         We collect all packets and merge their fields to get complete data.
+
+        E3800LFP firmware quirk: Device needs a brief pause after handshake before
+        accepting read commands. If first read returns 0 fields, wait and retry once.
         """
         if not self.connected:
             return {}
 
         with self._lock:
             try:
+                # E3800LFP quirk: Add delay after handshake to prevent connection drop
+                # (some firmware versions close the socket if read comes too soon)
+                if not hasattr(self, '_first_read_done'):
+                    time.sleep(0.5)
+                    self._first_read_done = True
+
                 # Send cmd 0x0011 (read)
                 pkt = _ttlv_build_packet(0x0011, b"", self._next_pid())
                 self._sock.sendall(pkt)
@@ -532,8 +546,46 @@ class LocalTransport:
                 self._sock.settimeout(original_timeout)
 
                 if not all_fields:
-                    log.warning("No data fields in local read response")
-                    return {}
+                    # E3800 quirk: Sometimes device needs time to prepare data after handshake
+                    # Retry once with a longer delay
+                    if not hasattr(self, '_retried_read'):
+                        log.debug("No data fields in first read, retrying in 1s...")
+                        self._retried_read = True
+                        time.sleep(1.0)
+                        # Retry read command
+                        pkt = _ttlv_build_packet(0x0011, b"", self._next_pid())
+                        self._sock.sendall(pkt)
+                        self._sock.settimeout(5.0)
+                        all_fields = []
+                        packets_read = 0
+                        while packets_read < max_packets:
+                            try:
+                                resp = self._recv_packet()
+                                parsed = _ttlv_parse_packet(resp)
+                                cmd = parsed.get("cmd", 0)
+                                if cmd == 0x0012:
+                                    packets_read += 1
+                                    continue
+                                if cmd == 0x0014:
+                                    payload = parsed.get("payload", b"")
+                                    if payload:
+                                        decrypted = self._decrypt(payload)
+                                        fields = _ttlv_parse_fields(decrypted)
+                                        all_fields.extend(fields)
+                                        packets_read += 1
+                                        log.debug("Retry: read packet %d with %d fields", packets_read, len(fields))
+                                else:
+                                    break
+                            except socket.timeout:
+                                break
+                            except Exception as e:
+                                log.debug("Retry packet read error: %s", e)
+                                break
+                        self._sock.settimeout(original_timeout)
+
+                    if not all_fields:
+                        log.warning("No data fields in local read response (even after retry)")
+                        return {}
 
                 log.debug("Collected %d total fields from %d packets", len(all_fields), packets_read)
                 kv = _fields_to_kv(all_fields)
