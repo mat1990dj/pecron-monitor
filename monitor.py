@@ -158,6 +158,29 @@ class PecronMonitor:
         """Set up local TCP and BLE transports for devices with lan_ip/ble in config."""
         configured = {d.get("device_key"): d for d in self.config.get("devices", [])}
 
+        # Auto-discovery: find devices on LAN if they have auth_key but missing/unreliable lan_ip
+        devices_to_discover = []
+        for dk, cfg in configured.items():
+            if cfg.get("auth_key") and (not cfg.get("lan_ip") or cfg.get("auto_discover", True)):
+                devices_to_discover.append({
+                    "device_key": dk,
+                    "auth_key": cfg["auth_key"]
+                })
+
+        if devices_to_discover and HAS_LOCAL:
+            try:
+                from lan_scan import discover_devices
+                discovered = discover_devices(devices_to_discover, timeout=0.5)
+                # Update configured IPs with discovered ones
+                for dk, ip in discovered.items():
+                    if dk in configured:
+                        old_ip = configured[dk].get("lan_ip")
+                        configured[dk]["lan_ip"] = ip
+                        if old_ip != ip:
+                            log.info("Updated %s IP: %s → %s", dk, old_ip or "(none)", ip)
+            except Exception as e:
+                log.warning("Auto-discovery failed: %s", e)
+
         if HAS_LOCAL:
             for device in self.devices:
                 dk = device["device_key"]
@@ -215,6 +238,52 @@ class PecronMonitor:
                                  f" @ {ble_addr}" if ble_addr else " (will scan)")
                 except Exception as e:
                     log.warning("Failed to set up BLE transport for %s: %s", dk, e)
+
+    def _rediscover_device(self, device_key: str) -> bool:
+        """Re-discover a single device on the LAN (triggered on connection failure).
+
+        Args:
+            device_key: Device key to re-discover
+
+        Returns:
+            True if device was found at a new IP, False otherwise
+        """
+        if not HAS_LOCAL:
+            return False
+
+        configured = {d.get("device_key"): d for d in self.config.get("devices", [])}
+        cfg = configured.get(device_key)
+        if not cfg or not cfg.get("auth_key"):
+            return False
+
+        log.info("Re-discovering device %s (connection lost)...", device_key)
+        try:
+            from lan_scan import discover_devices
+            discovered = discover_devices([{
+                "device_key": device_key,
+                "auth_key": cfg["auth_key"]
+            }], timeout=0.5)
+
+            if device_key in discovered:
+                new_ip = discovered[device_key]
+                old_ip = cfg.get("lan_ip")
+                if new_ip != old_ip:
+                    log.info("✅ Re-discovered %s at new IP: %s → %s", device_key, old_ip or "(none)", new_ip)
+                    # Update config and transport
+                    cfg["lan_ip"] = new_ip
+                    # Re-create transport with new IP
+                    from local_transport import LocalTransport
+                    self.local_transports[device_key] = LocalTransport(new_ip, cfg["auth_key"])
+                    return True
+                else:
+                    log.debug("Device %s still at same IP %s", device_key, new_ip)
+                    return False
+            else:
+                log.warning("Could not re-discover device %s", device_key)
+                return False
+        except Exception as e:
+            log.warning("Re-discovery failed for %s: %s", device_key, e)
+            return False
 
     def _connect_local(self, device_key: str) -> bool:
         """Try to connect local transport for a device.
@@ -651,7 +720,16 @@ class PecronMonitor:
             # Pecron devices close TCP after each response, so always reconnect
             lt = self.local_transports.get(dk)
             if lt:
-                self._connect_local(dk)
+                connected = self._connect_local(dk)
+                if not connected:
+                    # Connection failed — try re-discovery
+                    log.debug("Local TCP connection failed for %s, attempting re-discovery...", dk)
+                    if self._rediscover_device(dk):
+                        # Re-discovered at new IP, try connecting again
+                        lt = self.local_transports.get(dk)  # Get updated transport
+                        if lt:
+                            connected = self._connect_local(dk)
+
                 if lt.connected:
                     try:
                         kv = lt.read_status()
