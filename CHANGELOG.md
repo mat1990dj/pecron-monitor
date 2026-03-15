@@ -4,6 +4,11 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.8] — 2026-03-15
+
+### Fixed
+- **Crash when `charging_pack_status` is a string** — E3800LFP firmware sends pack fields as strings (e.g. `"99"` instead of `99`), causing `TypeError` in the battery field swap logic. All pack field comparisons now safely cast to numeric types. (Reported by JaredC01 on #15)
+
 ## [0.5.7] — 2026-03-15
 
 ### Fixed

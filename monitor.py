@@ -480,8 +480,11 @@ class PecronMonitor:
         packs = kv.get("charging_pack_data_jdb", [])
         if isinstance(packs, list):
             for pack in packs:
-                pack_battery = pack.get("charging_pack_battery", 0)
-                pack_status = pack.get("charging_pack_status", 0)
+                try:
+                    pack_battery = int(float(pack.get("charging_pack_battery", 0)))
+                    pack_status = int(float(pack.get("charging_pack_status", 0)))
+                except (ValueError, TypeError):
+                    continue
                 # If battery is 0 and status is 1-100, swap them
                 if pack_battery == 0 and 1 <= pack_status <= 100:
                     pack["charging_pack_battery"] = pack_status
@@ -1088,14 +1091,19 @@ class PecronMonitor:
 
             packs = kv.get("charging_pack_data_jdb", [])
             for i, pack in enumerate(packs):
-                if int(pack.get("charging_pack_status", 4)) != 4:
+                try:
+                    pack_status_val = int(float(pack.get("charging_pack_status", 4)))
+                except (ValueError, TypeError):
+                    pack_status_val = 4
+                if pack_status_val != 4:
                     # Fallback: some devices report battery % in charging_pack_status instead
-                    pack_battery = pack.get('charging_pack_battery', 0)
-                    if pack_battery == 0:
-                        pack_status = pack.get('charging_pack_status', 0)
-                        if pack_status > 0 and pack_status <= 100:
-                            pack_battery = pack_status
-                            log.debug("Using charging_pack_status (%d%%) as battery for pack %d", pack_status, i)
+                    try:
+                        pack_battery = int(float(pack.get('charging_pack_battery', 0)))
+                    except (ValueError, TypeError):
+                        pack_battery = 0
+                    if pack_battery == 0 and 1 <= pack_status_val <= 100:
+                        pack_battery = pack_status_val
+                        log.debug("Using charging_pack_status (%d%%) as battery for pack %d", pack_status_val, i)
                     print(f"Pack {i}:        {pack_battery if pack_battery > 0 else '?'}% "
                           f"{float(pack.get('charging_pack_voltage', 0)):.1f}V")
 
