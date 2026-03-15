@@ -492,9 +492,10 @@ class LocalTransport:
                 packets_read = 0
                 max_packets = 10  # Safety limit
 
-                # Temporarily reduce socket timeout for faster multi-packet reads
+                # Temporarily reduce socket timeout for multi-packet reads
+                # E3800/E3600 can take 3-4 seconds between packets
                 original_timeout = self._sock.gettimeout()
-                self._sock.settimeout(2.0)
+                self._sock.settimeout(5.0)
 
                 while packets_read < max_packets:
                     try:
