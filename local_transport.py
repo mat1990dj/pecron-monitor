@@ -280,7 +280,8 @@ def _fields_to_kv(fields: list) -> dict:
                 consumed += 1
 
             # Only set sub_dict if this wasn't an array (which already set kv[code])
-            if not is_array:
+            # Don't overwrite existing array data from earlier packets with dict format
+            if not is_array and not isinstance(kv.get(code), list):
                 kv[code] = sub_dict
             i = j
         elif ftype == "BOOL":
@@ -410,7 +411,8 @@ class LocalTransport:
             return True
 
         except Exception as e:
-            log.error("Local connect failed: %s", e)
+            # Pecron devices close TCP after each read — reconnects are normal
+            log.debug("Local connect failed: %s", e)
             self.disconnect()
             return False
 

@@ -506,15 +506,16 @@ class HomeAssistantBridge:
                 pass
 
         # AC and DC input power (separate sensors for E3800 and others)
+        # ALWAYS publish input power values (including 0) — 0W is valid, "Unknown" is not
         present, v = _get_first_present(SENSOR_FIELDS["ac_input_power"])
-        if present and (not packet_has_host or float(v) != 0.0):
+        if present:
             try:
                 cache["ac_input_power"] = int(float(v))
             except (TypeError, ValueError):
                 pass
 
         present, v = _get_first_present(SENSOR_FIELDS["dc_input_power"])
-        if present and (not packet_has_host or float(v) != 0.0):
+        if present:
             try:
                 cache["dc_input_power"] = int(float(v))
             except (TypeError, ValueError):
