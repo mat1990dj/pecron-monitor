@@ -348,16 +348,20 @@ class PecronMonitor:
         lt = self.local_transports.get(device_key)
         if not lt:
             return False
-        
+
         # E3800LFP connection cooldown: prevent hammering device during lockout
+        # Only skip if the PREVIOUS attempt FAILED (not on every attempt)
         now = time.time()
         last_attempt = self._last_connect_attempt.get(device_key, 0)
-        if now - last_attempt < 2.0:
-            # Skip connection attempt if we tried less than 2 seconds ago
-            log.debug("Skipping connect for %s (cooldown: %.1fs since last attempt)",
+        failure_count = self._local_connect_failures.get(device_key, 0)
+
+        # Only apply cooldown if we had a recent failure
+        if failure_count > 0 and now - last_attempt < 1.0:
+            # Skip connection attempt if we failed less than 1 second ago
+            log.debug("Skipping connect for %s (cooldown: %.1fs since last failure)",
                       device_key, now - last_attempt)
             return False
-        
+
         self._last_connect_attempt[device_key] = now
         
         try:
@@ -470,6 +474,19 @@ class PecronMonitor:
                 host_pct = _get_kv_single(kv, ("host_packet_data_jdb", "host_packet_electric_percentage"))
                 if host_pct is not None and host_pct > 0:
                     kv["battery_percentage"] = host_pct
+
+        # Fix EP3000 charging_pack_battery field swap (applies to ALL sources)
+        # Some devices report battery % in charging_pack_status instead of charging_pack_battery
+        packs = kv.get("charging_pack_data_jdb", [])
+        if isinstance(packs, list):
+            for pack in packs:
+                pack_battery = pack.get("charging_pack_battery", 0)
+                pack_status = pack.get("charging_pack_status", 0)
+                # If battery is 0 and status is 1-100, swap them
+                if pack_battery == 0 and 1 <= pack_status <= 100:
+                    pack["charging_pack_battery"] = pack_status
+                    pack["charging_pack_status"] = 0
+                    log.debug("Swapped charging_pack fields: battery was 0, using status=%d%%", pack_status)
 
         battery_pct = int(_get_kv(kv, SENSOR_FIELDS["battery_percent"], -1))
         voltage = float(_get_kv(kv, SENSOR_FIELDS["voltage"], 0))

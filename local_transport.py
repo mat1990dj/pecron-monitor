@@ -509,9 +509,9 @@ class LocalTransport:
                 max_packets = 10  # Safety limit
 
                 # Temporarily reduce socket timeout for multi-packet reads
-                # E3800/E3600 can take 3-4 seconds between packets
+                # E3800/E3600 can take 2-3 seconds between packets
                 original_timeout = self._sock.gettimeout()
-                self._sock.settimeout(5.0)
+                self._sock.settimeout(3.0)
 
                 while packets_read < max_packets:
                     try:
@@ -557,7 +557,7 @@ class LocalTransport:
                         # Retry read command
                         pkt = _ttlv_build_packet(0x0011, b"", self._next_pid())
                         self._sock.sendall(pkt)
-                        self._sock.settimeout(5.0)
+                        self._sock.settimeout(3.0)
                         all_fields = []
                         packets_read = 0
                         while packets_read < max_packets:

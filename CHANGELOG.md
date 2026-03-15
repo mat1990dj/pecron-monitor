@@ -4,6 +4,15 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.7] — 2026-03-15
+
+### Fixed
+- **Polling interval drift (10-30s instead of 5s)** — Fixed three root causes:
+  - Reduced connection cooldown from 2.0s to 1.0s and made it smarter (only applies after failures, not on every poll)
+  - Reduced TCP socket timeout from 5.0s to 3.0s (3s is sufficient for inter-packet gaps)
+  - Cooldown now only skips connection attempts if the PREVIOUS attempt FAILED (not on every successful poll)
+- **EP3000 charging_pack_battery field swap** — Some devices report battery percentage in `charging_pack_status` instead of `charging_pack_battery`; monitor now detects and swaps these fields when battery=0 and status=1-100% (applies to ALL data sources, not just local)
+
 ## [0.5.6] — 2026-03-02
 
 ### Fixed
