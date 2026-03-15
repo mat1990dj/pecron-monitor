@@ -939,17 +939,17 @@ class PecronMonitor:
         time.sleep(3)
         self._request_status()
 
-        high_freq_start = time.time()
-        high_freq_active = True
+        last_high_freq_time = time.time()
 
         try:
             while self._running:
                 time.sleep(poll_interval)
 
-                # Disable high-freq reporting after 60s warm-up period
-                if high_freq_active and (time.time() - high_freq_start) >= 60:
-                    self._disable_high_freq_reporting()
-                    high_freq_active = False
+                # Re-send high-freq reporting request every 20s (matches app behavior)
+                # The app continuously requests this while viewing a device
+                if time.time() - last_high_freq_time >= 20:
+                    self._enable_high_freq_reporting()
+                    last_high_freq_time = time.time()
 
                 if self._token_needs_refresh():
                     log.info("Refreshing token...")
@@ -978,7 +978,7 @@ class PecronMonitor:
         for d in self.devices:
             dk = d["device_key"]
             try:
-                self.send_control(dk, "high_frequency_reporting", 1)
+                self.send_control(dk, "high_frequency_reporting", 3)
                 log.info("Enabled high-freq reporting for %s", dk)
             except Exception as e:
                 log.debug("Could not enable high-freq for %s: %s", dk, e)
