@@ -513,8 +513,8 @@ class PecronMonitor:
         else:
             self.data_sources[device_key] = source
 
-        # Format remain time (handle unreliable values)
-        if remain < 0:
+        # Format remain time (handle unreliable values and 65535 sentinel)
+        if remain < 0 or remain >= 65535:
             remain_str = "N/A"
         else:
             remain_str = f"{remain // 60}h{remain % 60}m"
