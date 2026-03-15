@@ -161,7 +161,7 @@ class PecronMonitor:
         # Auto-discovery: find devices on LAN if they have auth_key but missing/unreliable lan_ip
         devices_to_discover = []
         for dk, cfg in configured.items():
-            if cfg.get("auth_key") and (not cfg.get("lan_ip") or cfg.get("auto_discover", True)):
+            if cfg.get("auth_key") and (not cfg.get("lan_ip") or cfg.get("auto_discover", False)):
                 devices_to_discover.append({
                     "device_key": dk,
                     "auth_key": cfg["auth_key"]
