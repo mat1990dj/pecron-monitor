@@ -485,8 +485,10 @@ class PecronMonitor:
                     pack_status = int(float(pack.get("charging_pack_status", 0)))
                 except (ValueError, TypeError):
                     continue
-                # If battery is 0 and status is 1-100, swap them
-                if pack_battery == 0 and 1 <= pack_status <= 100:
+                # If battery is 0 and status looks like a percentage (>4), swap them
+                # Status enum: 0=no charge, 1=cascade charging, 2=balance no charge,
+                #              3=balanced charging, 4=no connection — NOT percentages
+                if pack_battery == 0 and 5 <= pack_status <= 100:
                     pack["charging_pack_battery"] = pack_status
                     pack["charging_pack_status"] = 0
                     log.debug("Swapped charging_pack fields: battery was 0, using status=%d%%", pack_status)
@@ -1101,7 +1103,7 @@ class PecronMonitor:
                         pack_battery = int(float(pack.get('charging_pack_battery', 0)))
                     except (ValueError, TypeError):
                         pack_battery = 0
-                    if pack_battery == 0 and 1 <= pack_status_val <= 100:
+                    if pack_battery == 0 and 5 <= pack_status_val <= 100:
                         pack_battery = pack_status_val
                         log.debug("Using charging_pack_status (%d%%) as battery for pack %d", pack_status_val, i)
                     print(f"Pack {i}:        {pack_battery if pack_battery > 0 else '?'}% "
