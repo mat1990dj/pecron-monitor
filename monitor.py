@@ -60,6 +60,10 @@ class PecronMonitor:
 
         # Automation rules
         self.rules = config.get("rules", [])
+        
+        # TCP reconnection tracking (prevent cascading E3800LFP lockout)
+        self._local_connect_failures = {}  # device_key → consecutive failure count
+        self._last_connect_attempt = {}    # device_key → timestamp of last attempt
 
     def _next_packet_id(self) -> int:
         self._packet_id = (self._packet_id + 1) % 65535
@@ -301,6 +305,11 @@ class PecronMonitor:
         if not cfg or not cfg.get("auth_key"):
             return False
 
+        # Skip re-discovery if lan_ip is explicitly configured (pinned IP)
+        if cfg.get("lan_ip"):
+            log.debug("Skipping re-discovery for %s (lan_ip is pinned in config)", device_key)
+            return False
+
         log.info("Re-discovering device %s (connection lost)...", device_key)
         try:
             from lan_scan import discover_devices
@@ -339,10 +348,33 @@ class PecronMonitor:
         lt = self.local_transports.get(device_key)
         if not lt:
             return False
+        
+        # E3800LFP connection cooldown: prevent hammering device during lockout
+        now = time.time()
+        last_attempt = self._last_connect_attempt.get(device_key, 0)
+        if now - last_attempt < 2.0:
+            # Skip connection attempt if we tried less than 2 seconds ago
+            log.debug("Skipping connect for %s (cooldown: %.1fs since last attempt)",
+                      device_key, now - last_attempt)
+            return False
+        
+        self._last_connect_attempt[device_key] = now
+        
         try:
-            return lt.connect()
+            connected = lt.connect()
+            if connected:
+                # Reset failure counter on successful connection
+                self._local_connect_failures[device_key] = 0
+            else:
+                # Increment failure counter
+                self._local_connect_failures[device_key] = \
+                    self._local_connect_failures.get(device_key, 0) + 1
+            return connected
         except Exception as e:
             log.debug("Local connect failed for %s: %s", device_key, e)
+            # Increment failure counter on exception
+            self._local_connect_failures[device_key] = \
+                self._local_connect_failures.get(device_key, 0) + 1
             return False
 
     def _channel_id(self, device: dict) -> str:
@@ -767,13 +799,29 @@ class PecronMonitor:
             if lt:
                 connected = self._connect_local(dk)
                 if not connected:
-                    # Connection failed — try re-discovery
-                    log.debug("Local TCP connection failed for %s, attempting re-discovery...", dk)
-                    if self._rediscover_device(dk):
-                        # Re-discovered at new IP, try connecting again
-                        lt = self.local_transports.get(dk)  # Get updated transport
-                        if lt:
-                            connected = self._connect_local(dk)
+                    # Connection failed — check if we should trigger re-discovery
+                    failure_count = self._local_connect_failures.get(dk, 0)
+                    configured = {d.get("device_key"): d for d in self.config.get("devices", [])}
+                    cfg = configured.get(dk)
+                    has_pinned_ip = cfg and cfg.get("lan_ip")
+                    
+                    if has_pinned_ip:
+                        # Pinned IP: skip re-discovery, fall through to cloud MQTT
+                        log.debug("Local TCP connection failed for %s (pinned IP, failure #%d) — skipping to cloud",
+                                  dk, failure_count)
+                    elif failure_count >= 5:
+                        # Auto-discovered device with 5+ failures: try re-discovery
+                        log.debug("Local TCP connection failed for %s (%d consecutive failures), attempting re-discovery...",
+                                  dk, failure_count)
+                        if self._rediscover_device(dk):
+                            # Re-discovered at new IP, try connecting again
+                            lt = self.local_transports.get(dk)  # Get updated transport
+                            if lt:
+                                connected = self._connect_local(dk)
+                    else:
+                        # Auto-discovered device with <5 failures: skip to cloud
+                        log.debug("Local TCP connection failed for %s (auto-discovered, failure #%d) — skipping to cloud",
+                                  dk, failure_count)
 
                 if lt.connected:
                     try:
@@ -783,6 +831,8 @@ class PecronMonitor:
                             self._merge_device_data(dk, kv)
                             self._local_data_keys.add(dk)  # Mark as local data
                             self._process_data(dk, kv, source="LOCAL TCP")
+                            # Reset failure counter on successful read
+                            self._local_connect_failures[dk] = 0
                             continue
                     except Exception as e:
                         log.warning("Local TCP read failed for %s: %s", dk, e)
