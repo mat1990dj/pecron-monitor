@@ -215,4 +215,21 @@ ENUM_LABELS = {
         0: "Infrequent", 1: "LAN High-Freq",
         2: "WiFi High-Freq", 3: "LAN+WiFi High-Freq",
     },
+    # Common enums (E1500, E3800, etc.)
+    "machine_screen_light_as": {
+        0: "5%", 1: "20%", 2: "50%", 3: "80%", 4: "100%",
+    },
+    "noastime_io": {
+        0: "Off", 1: "1 Hour", 2: "2 Hours", 3: "3 Hours", 4: "4 Hours",
+    },
+    "ac_output_voltage_io": {
+        0: "100V", 1: "110V", 2: "120V", 3: "220V", 4: "230V", 5: "240V",
+    },
+    "ac_output_frequency_io": {
+        0: "50Hz", 1: "60Hz",
+    },
+    "ac_charging_power_ios": {
+        0: "0%", 1: "10%", 2: "20%", 3: "30%", 4: "40%",
+        5: "50%", 6: "60%", 7: "70%", 8: "80%", 9: "90%", 10: "100%",
+    },
 }
