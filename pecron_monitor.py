@@ -30,7 +30,7 @@ from pathlib import Path
 
 import yaml
 
-from constants import REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS
+from constants import REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS, ENUM_LABELS
 from cloud_api import login, get_product_catalog, get_product_tsl
 from helpers import _get_kv
 from monitor import PecronMonitor
@@ -104,6 +104,10 @@ def main():
             for code, info in sorted(tsl.items(), key=lambda x: x[1]["id"]):
                 rw = "RW" if "W" in info.get("access", "R").upper() else "RO"
                 print(f"  id={info['id']:3d}  {rw}  {info.get('type','?'):6s}  {code}  — {info.get('desc', '')}")
+                if info.get("type") == "ENUM" and code in ENUM_LABELS:
+                    labels = ENUM_LABELS[code]
+                    opts = "  ".join(f"{k}={v}" for k, v in sorted(labels.items()))
+                    print(f"                       {opts}")
         return
 
     if args.raw:

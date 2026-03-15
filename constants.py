@@ -199,3 +199,20 @@ FAULT_ALARM_LABELS = {
     16: "DC Output Overcurrent",
     17: "DC Output Over-Temperature",
 }
+
+# Master enum labels lookup — maps TSL control code → decode table
+ENUM_LABELS = {
+    "charging_limit_voltage_iaos": WB_CHARGE_VOLTAGE_LABELS,
+    "discharge_limiting_voltage_iaos": WB_DISCHARGE_VOLTAGE_LABELS,
+    "charging_current_limit_iaos": WB_CHARGE_CURRENT_LABELS,
+    "discharge_limiting_current_iaos": WB_DISCHARGE_CURRENT_LABELS,
+    "battery_heating_mode_us": WB_HEATING_MODE_LABELS,
+    "device_status_hm": DEVICE_STATUS_LABELS,
+    "device_standy_times_as": WB_STANDBY_TIME_LABELS,
+    "battery_coding_us": WB_BATTERY_CODING_LABELS,
+    "FAULT_ALARM_ENUM": FAULT_ALARM_LABELS,
+    "high_frequency_reporting": {
+        0: "Infrequent", 1: "LAN High-Freq",
+        2: "WiFi High-Freq", 3: "LAN+WiFi High-Freq",
+    },
+}
