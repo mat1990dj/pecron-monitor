@@ -30,7 +30,7 @@ def _fmt_dhm(minutes):
         m = int(minutes)
     except (TypeError, ValueError):
         return None
-    if m < 0:
+    if m < 0 or m >= 65535:
         return None
     d = m // (60 * 24)
     h = (m % (60 * 24)) // 60

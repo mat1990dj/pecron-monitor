@@ -121,4 +121,81 @@ SENSOR_FIELDS = {
     "discharge_limiting_voltage": [("discharge_limiting_voltage",)],
     "charging_current_limit": [("charging_current_limit",)],
     "discharge_limiting_current": [("discharge_limiting_current",)],
+    # Current (amps) — useful for motorhome/RV monitoring
+    "current": [
+        ("host_packet_data_jdb", "host_packet_current"),
+    ],
+}
+
+# ---------------------------------------------------------------------------
+# Enum decode tables — maps raw enum index to human-readable label
+# ---------------------------------------------------------------------------
+
+DEVICE_STATUS_LABELS = {
+    0: "Shut Down",
+    1: "Charging",
+    2: "DC Discharge",
+    3: "AC Discharge",
+    4: "Standby",
+    5: "Conservation",
+}
+
+# WB12200 charge limit voltage (enum index → actual voltage)
+WB_CHARGE_VOLTAGE_LABELS = {
+    0: "12.8V", 1: "13.2V", 2: "13.6V", 3: "14.0V", 4: "14.4V", 5: "14.6V",
+}
+
+# WB12200 discharge limit voltage
+WB_DISCHARGE_VOLTAGE_LABELS = {
+    0: "10.4V", 1: "10.8V", 2: "11.2V", 3: "11.6V", 4: "12.0V",
+}
+
+# WB12200 charge current limit
+WB_CHARGE_CURRENT_LABELS = {
+    0: "50A", 1: "60A", 2: "70A", 3: "80A", 4: "90A",
+    5: "100A", 6: "110A", 7: "120A",
+}
+
+# WB12200 discharge current limit
+WB_DISCHARGE_CURRENT_LABELS = {
+    0: "80A", 1: "100A", 2: "120A", 3: "140A", 4: "160A",
+    5: "180A", 6: "200A", 7: "220A",
+}
+
+# WB12200 battery heating mode
+WB_HEATING_MODE_LABELS = {
+    0: "Charging Heating", 1: "Keep Warm",
+}
+
+# WB12200 battery coding (for multi-battery pairing)
+WB_BATTERY_CODING_LABELS = {
+    1: "1", 2: "2", 3: "3", 4: "4", 5: "5",
+    6: "6", 7: "7", 8: "8", 9: "9", 10: "Host",
+}
+
+# WB12200 standby time
+WB_STANDBY_TIME_LABELS = {
+    0: "24 Hours", 1: "48 Hours", 2: "7 Days", 3: "14 Days", 4: "Always On",
+}
+
+# Fault alarm codes (WB12200 + general)
+FAULT_ALARM_LABELS = {
+    0: "Normal",
+    1: "Battery Over-Temperature",
+    2: "Battery Overvoltage",
+    3: "Battery Undervoltage",
+    4: "Battery Short Circuit",
+    5: "Charge Overcurrent",
+    6: "Discharge Overcurrent",
+    7: "Charger Input Overvoltage",
+    8: "Charger Input Overcurrent",
+    9: "Charger Output Overvoltage",
+    10: "Charger Output Overcurrent",
+    11: "Charger Output Short Circuit",
+    12: "Charger Input Undervoltage",
+    13: "Charger Overheating",
+    14: "DC Output Short Circuit",
+    15: "DC Output Overvoltage",
+    16: "DC Output Overcurrent",
+    17: "DC Output Over-Temperature",
 }

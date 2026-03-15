@@ -14,7 +14,11 @@ except ImportError:
     mqtt = None
 
 from helpers import _truthy, _get_kv, _get_kv_single, _fmt_dhm
-from constants import SENSOR_FIELDS
+from constants import (SENSOR_FIELDS, DEVICE_STATUS_LABELS, FAULT_ALARM_LABELS,
+                       WB_CHARGE_VOLTAGE_LABELS, WB_DISCHARGE_VOLTAGE_LABELS,
+                       WB_CHARGE_CURRENT_LABELS, WB_DISCHARGE_CURRENT_LABELS,
+                       WB_HEATING_MODE_LABELS, WB_BATTERY_CODING_LABELS,
+                       WB_STANDBY_TIME_LABELS)
 
 log = logging.getLogger("pecron")
 
@@ -343,6 +347,17 @@ class HomeAssistantBridge:
                 "value_template": "{{ value_json.ac_output_voltage }}",
                 "device": dev_info,
                 "unique_id": f"pecron_{dk}_ac_output_voltage",
+            })
+
+            # Current sensor (amps — critical for RV/motorhome monitoring)
+            self._pub_config("sensor", dk, "current", {
+                "name": "Current",
+                "device_class": "current",
+                "unit_of_measurement": "A",
+                "state_topic": f"pecron/{dk}/state",
+                "value_template": "{{ value_json.current }}",
+                "device": dev_info,
+                "unique_id": f"pecron_{dk}_current",
             })
 
             # DC output power sensor
@@ -679,13 +694,28 @@ class HomeAssistantBridge:
             if v is not None:
                 cache[field] = v
 
-        # ---- WB12200 battery management ----
-        for field in ("battery_heating_mode", "charging_limit_voltage",
-                       "discharge_limiting_voltage", "charging_current_limit",
-                       "discharge_limiting_current", "FAULT_ALARM_ENUM"):
+        # ---- WB12200 battery management (decode enum indices to friendly labels) ----
+        _wb_enum_fields = {
+            "charging_limit_voltage": WB_CHARGE_VOLTAGE_LABELS,
+            "discharge_limiting_voltage": WB_DISCHARGE_VOLTAGE_LABELS,
+            "charging_current_limit": WB_CHARGE_CURRENT_LABELS,
+            "discharge_limiting_current": WB_DISCHARGE_CURRENT_LABELS,
+            "battery_heating_mode": WB_HEATING_MODE_LABELS,
+        }
+        for field, labels in _wb_enum_fields.items():
             v = kv.get(field)
             if v is not None:
-                cache[field] = v
+                try:
+                    cache[field] = labels.get(int(v), str(v))
+                except (TypeError, ValueError):
+                    cache[field] = str(v)
+
+        v = kv.get("FAULT_ALARM_ENUM")
+        if v is not None:
+            try:
+                cache["FAULT_ALARM_ENUM"] = FAULT_ALARM_LABELS.get(int(v), f"Fault {v}")
+            except (TypeError, ValueError):
+                cache["FAULT_ALARM_ENUM"] = str(v)
 
         for field in ("beep_voice_us", "battery_indicator_us"):
             v = kv.get(field)
@@ -716,7 +746,18 @@ class HomeAssistantBridge:
 
         present, v = _get_first_present(SENSOR_FIELDS["device_status_hm"])
         if present:
-            cache["device_status_hm"] = v
+            try:
+                cache["device_status_hm"] = DEVICE_STATUS_LABELS.get(int(v), str(v))
+            except (TypeError, ValueError):
+                cache["device_status_hm"] = str(v)
+
+        # Current (amps)
+        present, v = _get_first_present(SENSOR_FIELDS["current"])
+        if present:
+            try:
+                cache["current"] = round(float(v), 2)
+            except (TypeError, ValueError):
+                pass
 
         # ---- SOC vs Host % ----
         # Your device alternates two payload shapes:
