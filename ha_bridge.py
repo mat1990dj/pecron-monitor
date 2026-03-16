@@ -88,6 +88,12 @@ class HomeAssistantBridge:
         for device in self.devices:
             dk = device["device_key"]
             name = device["device_name"]
+
+            # Determine device model type
+            name_upper = name.upper()
+            is_wb = 'WB' in name_upper  # WB12200 battery module
+            is_pps = not is_wb  # Portable power station (E-series, F-series)
+
             dev_info = {
                 "identifiers": [f"pecron_{dk}"],
                 "name": f"Pecron {name} ({dk})",
@@ -142,35 +148,36 @@ class HomeAssistantBridge:
             })
 
             # E3800-specific temperature sensors (3 separate sensors)
-            self._pub_config("sensor", dk, "battery_temp", {
-                "name": "Battery Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.battery_temp }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_battery_temp",
-            })
+            if is_pps:
+                self._pub_config("sensor", dk, "battery_temp", {
+                    "name": "Battery Temperature",
+                    "device_class": "temperature",
+                    "unit_of_measurement": "°C",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.battery_temp }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_battery_temp",
+                })
 
-            self._pub_config("sensor", dk, "charging_plate_temp", {
-                "name": "Charging Plate Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.charging_plate_temp }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_charging_plate_temp",
-            })
+                self._pub_config("sensor", dk, "charging_plate_temp", {
+                    "name": "Charging Plate Temperature",
+                    "device_class": "temperature",
+                    "unit_of_measurement": "°C",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.charging_plate_temp }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_charging_plate_temp",
+                })
 
-            self._pub_config("sensor", dk, "inverter_temp", {
-                "name": "Inverter Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.inverter_temp }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_inverter_temp",
-            })
+                self._pub_config("sensor", dk, "inverter_temp", {
+                    "name": "Inverter Temperature",
+                    "device_class": "temperature",
+                    "unit_of_measurement": "°C",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.inverter_temp }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_inverter_temp",
+                })
 
             # Power in/out sensors
             for key, label in [("total_input", "Input Power"), ("total_output", "Output Power")]:
@@ -185,26 +192,27 @@ class HomeAssistantBridge:
                 })
 
             # AC input power sensor (separate from DC)
-            self._pub_config("sensor", dk, "ac_input", {
-                "name": "AC Input Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_input_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_input",
-            })
+            if is_pps:
+                self._pub_config("sensor", dk, "ac_input", {
+                    "name": "AC Input Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_input_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_input",
+                })
 
-            # DC input power sensor (separate from AC)
-            self._pub_config("sensor", dk, "dc_input", {
-                "name": "DC Input Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.dc_input_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_dc_input",
-            })
+                # DC input power sensor (separate from AC)
+                self._pub_config("sensor", dk, "dc_input", {
+                    "name": "DC Input Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.dc_input_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_dc_input",
+                })
 
             # Remaining time sensor
             # Remaining time sensor (H:M)
@@ -260,116 +268,118 @@ class HomeAssistantBridge:
             # These only appear if the device has these capabilities
             # (HA will just show "unavailable" if the device doesn't report them)
 
-            # Eco/Quiet mode switch
-            self._pub_config("switch", dk, "eco_mode", {
-                "name": "Eco Mode",
-                "icon": "mdi:leaf",
-                "command_topic": f"pecron/{dk}/eco_mode/set",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.eco_quite_mode_as }}",
-                "state_on": "ON", "state_off": "OFF",
-                "payload_on": "ON", "payload_off": "OFF",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_eco_mode",
-            })
+            if is_pps:
+                # Eco/Quiet mode switch
+                self._pub_config("switch", dk, "eco_mode", {
+                    "name": "Eco Mode",
+                    "icon": "mdi:leaf",
+                    "command_topic": f"pecron/{dk}/eco_mode/set",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.eco_quite_mode_as }}",
+                    "state_on": "ON", "state_off": "OFF",
+                    "payload_on": "ON", "payload_off": "OFF",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_eco_mode",
+                })
 
-            # Touch panel lock
-            self._pub_config("switch", dk, "touch_lock", {
-                "name": "Touch Panel Lock",
-                "icon": "mdi:lock",
-                "command_topic": f"pecron/{dk}/touch_lock/set",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.device_touch_locking_as }}",
-                "state_on": "ON", "state_off": "OFF",
-                "payload_on": "ON", "payload_off": "OFF",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_touch_lock",
-            })
+                # Touch panel lock
+                self._pub_config("switch", dk, "touch_lock", {
+                    "name": "Touch Panel Lock",
+                    "icon": "mdi:lock",
+                    "command_topic": f"pecron/{dk}/touch_lock/set",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.device_touch_locking_as }}",
+                    "state_on": "ON", "state_off": "OFF",
+                    "payload_on": "ON", "payload_off": "OFF",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_touch_lock",
+                })
 
-            # AC charging power level
-            self._pub_config("sensor", dk, "ac_charging_power", {
-                "name": "AC Charging Power Setting",
-                "icon": "mdi:flash",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_charging_power_ios }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_charging_power",
-            })
+                # AC charging power level
+                self._pub_config("sensor", dk, "ac_charging_power", {
+                    "name": "AC Charging Power Setting",
+                    "icon": "mdi:flash",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_charging_power_ios }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_charging_power",
+                })
 
-            # UPS charge threshold
-            self._pub_config("sensor", dk, "ups_charge_threshold", {
-                "name": "UPS Charge Threshold",
-                "icon": "mdi:battery-charging",
-                "unit_of_measurement": "%",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ups_start_charge_value_as }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ups_charge_threshold",
-            })
+                # UPS charge threshold
+                self._pub_config("sensor", dk, "ups_charge_threshold", {
+                    "name": "UPS Charge Threshold",
+                    "icon": "mdi:battery-charging",
+                    "unit_of_measurement": "%",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ups_start_charge_value_as }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ups_charge_threshold",
+                })
 
-            # Standby timeout
-            self._pub_config("sensor", dk, "standby_timeout", {
-                "name": "Standby Timeout",
-                "icon": "mdi:timer-sand",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.device_standy_times_as }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_standby_timeout",
-            })
+                # Standby timeout
+                self._pub_config("sensor", dk, "standby_timeout", {
+                    "name": "Standby Timeout",
+                    "icon": "mdi:timer-sand",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.device_standy_times_as }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_standby_timeout",
+                })
 
-            # Bypass mode
-            self._pub_config("switch", dk, "bypass", {
-                "name": "Bypass Mode",
-                "icon": "mdi:transfer",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.bypass_enable }}",
-                "state_on": "ON", "state_off": "OFF",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_bypass",
-            })
+                # Bypass mode
+                self._pub_config("switch", dk, "bypass", {
+                    "name": "Bypass Mode",
+                    "icon": "mdi:transfer",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.bypass_enable }}",
+                    "state_on": "ON", "state_off": "OFF",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_bypass",
+                })
 
-            # AC output power sensor
-            self._pub_config("sensor", dk, "ac_output", {
-                "name": "AC Output Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_output_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_output",
-            })
+            if is_pps:
+                # AC output power sensor
+                self._pub_config("sensor", dk, "ac_output", {
+                    "name": "AC Output Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_output_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_output",
+                })
 
-            # AC output voltage sensor
-            self._pub_config("sensor", dk, "ac_output_voltage", {
-                "name": "AC Output Voltage",
-                "device_class": "voltage",
-                "unit_of_measurement": "V",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_output_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_output_voltage",
-            })
+                # AC output voltage sensor
+                self._pub_config("sensor", dk, "ac_output_voltage", {
+                    "name": "AC Output Voltage",
+                    "device_class": "voltage",
+                    "unit_of_measurement": "V",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_output_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_output_voltage",
+                })
 
-            # AC output frequency sensor
-            self._pub_config("sensor", dk, "ac_output_hz", {
-                "name": "AC Output Frequency",
-                "icon": "mdi:sine-wave",
-                "unit_of_measurement": "Hz",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_output_hz }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_output_hz",
-            })
+                # AC output frequency sensor
+                self._pub_config("sensor", dk, "ac_output_hz", {
+                    "name": "AC Output Frequency",
+                    "icon": "mdi:sine-wave",
+                    "unit_of_measurement": "Hz",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_output_hz }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_output_hz",
+                })
 
-            # AC power factor sensor
-            self._pub_config("sensor", dk, "ac_output_pf", {
-                "name": "AC Power Factor",
-                "icon": "mdi:angle-acute",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.ac_output_pf }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_ac_output_pf",
-            })
+                # AC power factor sensor
+                self._pub_config("sensor", dk, "ac_output_pf", {
+                    "name": "AC Power Factor",
+                    "icon": "mdi:angle-acute",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.ac_output_pf }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_ac_output_pf",
+                })
 
             # Current sensor (amps — critical for RV/motorhome monitoring)
             self._pub_config("sensor", dk, "current", {
@@ -382,109 +392,111 @@ class HomeAssistantBridge:
                 "unique_id": f"pecron_{dk}_current",
             })
 
-            # DC output power sensor
-            self._pub_config("sensor", dk, "dc_output", {
-                "name": "DC Output Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.dc_output_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_dc_output",
-            })
+            if is_pps:
+                # DC output power sensor
+                self._pub_config("sensor", dk, "dc_output", {
+                    "name": "DC Output Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.dc_output_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_dc_output",
+                })
 
-            # DC5521 (barrel) input sensors
-            self._pub_config("sensor", dk, "dc5521_input_voltage", {
-                "name": "DC5521 Input Voltage",
-                "device_class": "voltage",
-                "unit_of_measurement": "V",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.dc5521_input_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_dc5521_input_voltage",
-            })
+            if is_pps:
+                # DC5521 (barrel) input sensors
+                self._pub_config("sensor", dk, "dc5521_input_voltage", {
+                    "name": "DC5521 Input Voltage",
+                    "device_class": "voltage",
+                    "unit_of_measurement": "V",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.dc5521_input_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_dc5521_input_voltage",
+                })
 
-            self._pub_config("sensor", dk, "dc5521_input_current", {
-                "name": "DC5521 Input Current",
-                "device_class": "current",
-                "unit_of_measurement": "A",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.dc5521_input_current }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_dc5521_input_current",
-            })
+                self._pub_config("sensor", dk, "dc5521_input_current", {
+                    "name": "DC5521 Input Current",
+                    "device_class": "current",
+                    "unit_of_measurement": "A",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.dc5521_input_current }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_dc5521_input_current",
+                })
 
-            self._pub_config("sensor", dk, "dc5521_input_power", {
-                "name": "DC5521 Input Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.dc5521_input_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_dc5521_input_power",
-            })
+                self._pub_config("sensor", dk, "dc5521_input_power", {
+                    "name": "DC5521 Input Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.dc5521_input_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_dc5521_input_power",
+                })
 
-            # Solar Port 1 (GX16-MF1) input sensors
-            self._pub_config("sensor", dk, "gx16mf1_input_voltage", {
-                "name": "Solar Port 1 Voltage",
-                "device_class": "voltage",
-                "unit_of_measurement": "V",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf1_input_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf1_input_voltage",
-            })
+                # Solar Port 1 (GX16-MF1) input sensors
+                self._pub_config("sensor", dk, "gx16mf1_input_voltage", {
+                    "name": "Solar Port 1 Voltage",
+                    "device_class": "voltage",
+                    "unit_of_measurement": "V",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf1_input_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf1_input_voltage",
+                })
 
-            self._pub_config("sensor", dk, "gx16mf1_input_current", {
-                "name": "Solar Port 1 Current",
-                "device_class": "current",
-                "unit_of_measurement": "A",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf1_input_current }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf1_input_current",
-            })
+                self._pub_config("sensor", dk, "gx16mf1_input_current", {
+                    "name": "Solar Port 1 Current",
+                    "device_class": "current",
+                    "unit_of_measurement": "A",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf1_input_current }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf1_input_current",
+                })
 
-            self._pub_config("sensor", dk, "gx16mf1_input_power", {
-                "name": "Solar Port 1 Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf1_input_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf1_input_power",
-            })
+                self._pub_config("sensor", dk, "gx16mf1_input_power", {
+                    "name": "Solar Port 1 Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf1_input_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf1_input_power",
+                })
 
-            # Solar Port 2 (GX16-MF2) input sensors
-            self._pub_config("sensor", dk, "gx16mf2_input_voltage", {
-                "name": "Solar Port 2 Voltage",
-                "device_class": "voltage",
-                "unit_of_measurement": "V",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf2_input_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf2_input_voltage",
-            })
+                # Solar Port 2 (GX16-MF2) input sensors
+                self._pub_config("sensor", dk, "gx16mf2_input_voltage", {
+                    "name": "Solar Port 2 Voltage",
+                    "device_class": "voltage",
+                    "unit_of_measurement": "V",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf2_input_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf2_input_voltage",
+                })
 
-            self._pub_config("sensor", dk, "gx16mf2_input_current", {
-                "name": "Solar Port 2 Current",
-                "device_class": "current",
-                "unit_of_measurement": "A",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf2_input_current }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf2_input_current",
-            })
+                self._pub_config("sensor", dk, "gx16mf2_input_current", {
+                    "name": "Solar Port 2 Current",
+                    "device_class": "current",
+                    "unit_of_measurement": "A",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf2_input_current }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf2_input_current",
+                })
 
-            self._pub_config("sensor", dk, "gx16mf2_input_power", {
-                "name": "Solar Port 2 Power",
-                "device_class": "power",
-                "unit_of_measurement": "W",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.gx16mf2_input_power }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_gx16mf2_input_power",
-            })
+                self._pub_config("sensor", dk, "gx16mf2_input_power", {
+                    "name": "Solar Port 2 Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.gx16mf2_input_power }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_gx16mf2_input_power",
+                })
 
             # Remaining charging time
             self._pub_config("sensor", dk, "remaining_charging_time", {
@@ -584,80 +596,82 @@ class HomeAssistantBridge:
             })
 
             # === WB12200 battery management sensors ===
-            self._pub_config("sensor", dk, "charging_limit_voltage", {
-                "name": "Charging Limit Voltage",
-                "device_class": "voltage",
-                "icon": "mdi:battery-charging-high",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.charging_limit_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_charging_limit_voltage",
-            })
+            if is_wb:
+                self._pub_config("sensor", dk, "charging_limit_voltage", {
+                    "name": "Charging Limit Voltage",
+                    "device_class": "voltage",
+                    "icon": "mdi:battery-charging-high",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.charging_limit_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_charging_limit_voltage",
+                })
 
-            self._pub_config("sensor", dk, "discharge_limit_voltage", {
-                "name": "Discharge Limit Voltage",
-                "device_class": "voltage",
-                "icon": "mdi:battery-low",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.discharge_limiting_voltage }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_discharge_limit_voltage",
-            })
+                self._pub_config("sensor", dk, "discharge_limit_voltage", {
+                    "name": "Discharge Limit Voltage",
+                    "device_class": "voltage",
+                    "icon": "mdi:battery-low",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.discharge_limiting_voltage }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_discharge_limit_voltage",
+                })
 
-            self._pub_config("sensor", dk, "charging_current_limit", {
-                "name": "Charging Current Limit",
-                "device_class": "current",
-                "unit_of_measurement": "A",
-                "icon": "mdi:current-dc",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.charging_current_limit }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_charging_current_limit",
-            })
+                self._pub_config("sensor", dk, "charging_current_limit", {
+                    "name": "Charging Current Limit",
+                    "device_class": "current",
+                    "unit_of_measurement": "A",
+                    "icon": "mdi:current-dc",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.charging_current_limit }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_charging_current_limit",
+                })
 
-            self._pub_config("sensor", dk, "discharge_current_limit", {
-                "name": "Discharge Current Limit",
-                "device_class": "current",
-                "unit_of_measurement": "A",
-                "icon": "mdi:current-dc",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.discharge_limiting_current }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_discharge_current_limit",
-            })
+                self._pub_config("sensor", dk, "discharge_current_limit", {
+                    "name": "Discharge Current Limit",
+                    "device_class": "current",
+                    "unit_of_measurement": "A",
+                    "icon": "mdi:current-dc",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.discharge_limiting_current }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_discharge_current_limit",
+                })
 
-            self._pub_config("sensor", dk, "battery_heating", {
-                "name": "Battery Heating Mode",
-                "icon": "mdi:radiator",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.battery_heating_mode }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_battery_heating",
-            })
+                self._pub_config("sensor", dk, "battery_heating", {
+                    "name": "Battery Heating Mode",
+                    "icon": "mdi:radiator",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.battery_heating_mode }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_battery_heating",
+                })
 
-            # Beep/voice switch (WB12200)
-            self._pub_config("switch", dk, "beep", {
-                "name": "Beep/Voice Alert",
-                "icon": "mdi:volume-high",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.beep_voice_us }}",
-                "state_on": "ON", "state_off": "OFF",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_beep",
-            })
+                # Beep/voice switch (WB12200)
+                self._pub_config("switch", dk, "beep", {
+                    "name": "Beep/Voice Alert",
+                    "icon": "mdi:volume-high",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.beep_voice_us }}",
+                    "state_on": "ON", "state_off": "OFF",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_beep",
+                })
 
-            # Fault alarm sensor
-            self._pub_config("sensor", dk, "fault_alarm", {
-                "name": "Fault Alarm",
-                "icon": "mdi:alert-circle",
-                "state_topic": f"pecron/{dk}/state",
-                "value_template": "{{ value_json.FAULT_ALARM_ENUM }}",
-                "device": dev_info,
-                "unique_id": f"pecron_{dk}_fault_alarm",
-            })
+                # Fault alarm sensor
+                self._pub_config("sensor", dk, "fault_alarm", {
+                    "name": "Fault Alarm",
+                    "icon": "mdi:alert-circle",
+                    "state_topic": f"pecron/{dk}/state",
+                    "value_template": "{{ value_json.FAULT_ALARM_ENUM }}",
+                    "device": dev_info,
+                    "unique_id": f"pecron_{dk}_fault_alarm",
+                })
 
-            # Per-pack sensors (charging_pack_data_jdb) — packs 0-3
-            for pack_num in range(4):
+            # Per-pack sensors (charging_pack_data_jdb) — packs 0-3 (PPS only)
+            if is_pps:
+              for pack_num in range(4):
                 # Pack battery percentage
                 self._pub_config("sensor", dk, f"pack_{pack_num}_battery", {
                     "name": f"Pack {pack_num} Battery",

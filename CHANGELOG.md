@@ -4,6 +4,12 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] — 2026-03-15
+
+### Improved
+- **Model-specific HA entities** — WB12200 users no longer see 38 irrelevant "Unknown" entities (solar ports, AC/DC output, packs, etc.). Portable power stations (E-series, F-series) no longer see WB12200-specific battery management entities (charging/discharge limits, heating mode, beep). Entity counts: PPS = 65, WB12200 = 27.
+- **Device key in HA device name** — shows as "Pecron E3800LFP (ABC123)" for multi-device setups
+
 ## [0.6.1] — 2026-03-15
 
 ### Added
