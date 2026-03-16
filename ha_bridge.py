@@ -74,8 +74,14 @@ class HomeAssistantBridge:
 
         self.client.on_connect = on_connect
         self.client.on_message = on_message
-        self.client.connect(host, port)
-        self.client.loop_start()
+        try:
+            self.client.connect(host, port)
+            self.client.loop_start()
+        except (ConnectionRefusedError, OSError) as e:
+            log.error("Cannot connect to MQTT broker at %s:%d — %s. HA bridge disabled.", host, port, e)
+            log.error("Install mosquitto or disable homeassistant.enabled in config.yaml")
+            self._connected = False
+            return
 
     def _handle_command(self, device_key: str, control: str, payload: str):
         """Called when HA sends a command. Delegates to the monitor."""
