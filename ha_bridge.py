@@ -85,6 +85,7 @@ class HomeAssistantBridge:
 
     def _publish_discovery(self):
         """Publish HA MQTT auto-discovery messages."""
+        self._published_topics = set()
         for device in self.devices:
             dk = device["device_key"]
             name = device["device_name"]
@@ -726,11 +727,48 @@ class HomeAssistantBridge:
                     "unique_id": f"pecron_{dk}_pack_{pack_num}_status",
                 })
 
+            # Clear stale entities from previous versions that no longer apply to this model
+            self._clear_stale_entities(dk)
+
         log.info("Published Home Assistant discovery configs")
 
     def _pub_config(self, component: str, dk: str, key: str, config: dict):
         topic = f"{self.discovery_prefix}/{component}/pecron_{dk}/{key}/config"
         self.client.publish(topic, json.dumps(config), qos=1, retain=True)
+        self._published_topics.add(topic)
+
+    def _clear_stale_entities(self, dk: str):
+        """Publish empty retained messages for entities that were previously published
+        but are no longer relevant (e.g., WB12200-only entities on an E3800).
+        This removes stale entities from Home Assistant."""
+        # All possible entity keys across all models
+        ALL_ENTITY_KEYS = {
+            "sensor": [
+                "battery", "host_battery", "voltage", "temperature", "current",
+                "total_input", "total_output", "remaining_time",
+                "battery_temp", "charging_plate_temp", "inverter_temp",
+                "ac_input", "dc_input", "ac_output", "dc_output",
+                "ac_output_voltage", "ac_output_hz", "ac_output_pf",
+                "dc5521_input_voltage", "dc5521_input_current", "dc5521_input_power",
+                "gx16mf1_input_voltage", "gx16mf1_input_current", "gx16mf1_input_power",
+                "gx16mf2_input_voltage", "gx16mf2_input_current", "gx16mf2_input_power",
+                "remaining_charging_time", "total_energy", "device_status",
+                "ac_charging_power", "ups_charge_threshold", "standby_timeout",
+                "screen_brightness", "auto_off_timer",
+                "ac_voltage_setting", "ac_frequency_setting",
+                "charging_limit_voltage", "discharge_limit_voltage",
+                "charging_current_limit", "discharge_current_limit",
+                "battery_heating", "fault_alarm",
+            ] + [f"pack_{i}_{f}" for i in range(4) for f in ["battery", "voltage", "current", "temp", "status"]],
+            "switch": ["ac", "dc", "ups", "eco_mode", "touch_lock", "bypass", "auto_dim", "beep"],
+            "binary_sensor": ["expansion_pack"],
+        }
+        for component, keys in ALL_ENTITY_KEYS.items():
+            for key in keys:
+                topic = f"{self.discovery_prefix}/{component}/pecron_{dk}/{key}/config"
+                if topic not in self._published_topics:
+                    # Publish empty retained message to clear stale entity
+                    self.client.publish(topic, "", qos=1, retain=True)
 
     def publish_state(self, device_key: str, kv: dict):
         """Publish current state to HA.

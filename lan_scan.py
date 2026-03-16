@@ -45,51 +45,53 @@ def _scan_lan_for_pecron(subnet: str = None, timeout: float = 0.3) -> list:
 
 
 def _setup_lan_discovery(devices: list, token: str, region: dict) -> list:
-    """Interactive LAN setup: scan network, match devices, fetch auth keys.
+    """Interactive LAN setup: scan network, auto-match devices via auth_key handshake.
 
     Returns the modified devices list with lan_ip and auth_key added.
     """
     from local_transport import get_auth_key
 
-    found_ips = _scan_lan_for_pecron()
-
-    if not found_ips:
-        print("  No Pecron devices found on LAN.")
-        manual_ip = input("  Enter device IP manually (or press Enter to skip): ").strip()
-        if manual_ip:
-            found_ips = [manual_ip]
-        else:
-            return devices
-
+    # Ensure all devices have auth_keys first (needed for handshake matching)
     for device in devices:
         dk = device["device_key"]
-        if len(found_ips) == 1:
-            ip = found_ips[0]
-            print(f"  Assigning {ip} to {device.get('name', dk)}")
-        else:
-            print(f"\n  Multiple Pecron devices found. Which IP is {device.get('name', dk)}?")
-            for i, ip in enumerate(found_ips):
-                print(f"    {i + 1}. {ip}")
-            choice = input(f"  Choose [1-{len(found_ips)}]: ").strip()
+        if not device.get("auth_key"):
             try:
-                ip = found_ips[int(choice) - 1]
-            except (ValueError, IndexError):
-                print("  Skipping.")
-                continue
+                print(f"  Fetching encryption key for {device.get('name', dk)}...", end="", flush=True)
+                auth_key = get_auth_key(token, region, device["product_key"], dk)
+                device["auth_key"] = auth_key
+                print(f" ✅")
+            except Exception as e:
+                print(f" ❌ ({e})")
 
-        device["lan_ip"] = ip
+    # Auto-discover: scan for port 6607, then handshake to identify each device
+    print("  Scanning local network for Pecron devices...")
+    discovered = discover_devices(devices, timeout=0.5)
 
-        # Fetch and cache auth key
-        try:
-            print(f"  Fetching encryption key for {dk}...", end="", flush=True)
-            auth_key = get_auth_key(token, region, device["product_key"], dk)
-            device["auth_key"] = auth_key
-            print(f" ✅")
-        except Exception as e:
-            print(f" ❌ ({e})")
-            print("  Local monitoring will fetch the key on next startup (requires internet).")
+    if discovered:
+        for dk, ip in discovered.items():
+            for d in devices:
+                if d["device_key"] == dk:
+                    d["lan_ip"] = ip
+                    print(f"  ✅ {d.get('name', dk)} → {ip} (auto-matched via handshake)")
+                    break
+    else:
+        print("  No Pecron devices found on LAN via auto-discovery.")
 
-    print("  LAN configuration complete!")
+    # Offer manual IP entry for any devices not found
+    for device in devices:
+        if device.get("lan_ip"):
+            continue
+        manual_ip = input(f"  Enter LAN IP for {device.get('name', device['device_key'])} (or Enter to skip): ").strip()
+        if manual_ip:
+            device["lan_ip"] = manual_ip
+
+    unmatched = [d for d in devices if not d.get("lan_ip")]
+    if unmatched:
+        names = ", ".join(d.get("name", d["device_key"]) for d in unmatched)
+        print(f"  ℹ️  Not found on LAN: {names}")
+        print(f"     These will use cloud MQTT only (or configure lan_ip in config.yaml later)")
+    
+    print("  LAN discovery complete!")
     return devices
 
 
