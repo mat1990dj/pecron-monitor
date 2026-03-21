@@ -385,11 +385,14 @@ class PecronMonitor:
         return f"qd{device['product_key']}{device['device_key']}"
 
     def _has_telemetry_fields(self, kv: dict) -> bool:
-        """Check if data dict contains any telemetry fields (not just settings).
+        """Check if data dict contains COMPLETE telemetry fields (not just settings).
         
         E3600/E3800 local TCP returns ONLY settings fields (14 fields like 
         ac_output_voltage_io, ac_output_frequency_io, noastime_io, ac_switch_hm, etc.)
         but NO telemetry (battery_percentage, voltage, power, temperature).
+        
+        E3800 might return battery_percentage alone, but without voltage/power/temp,
+        so we need to check for host_packet_data_jdb which contains the real telemetry.
         
         This method checks for key telemetry fields to determine if local data
         should be treated as primary or if we need to rely on MQTT cloud data.
@@ -398,31 +401,40 @@ class PecronMonitor:
             kv: Data dict to check
             
         Returns:
-            True if data contains any telemetry fields, False if only settings
+            True if data contains COMPLETE telemetry fields, False if only settings
         """
-        # Check for key telemetry fields
-        telemetry_indicators = [
-            "battery_percentage",
-            "host_packet_data_jdb",  # Contains voltage, temp, battery in nested form
-            "total_input_power",
-            "total_output_power",
-            "ac_data_output_hm",     # AC power data
-            "dc_data_output_hm",     # DC power data
-            "ac_data_input_hm",      # AC input data
-            "dc_data_input_hm",      # DC input data
-        ]
-        
-        for field in telemetry_indicators:
-            if field in kv:
-                value = kv[field]
-                # For nested dicts, check if they're non-empty
-                if isinstance(value, dict):
-                    if value:  # Non-empty dict
-                        return True
-                # For scalars, check if non-zero (battery_percentage, power fields)
-                elif value is not None and value != 0:
+        # host_packet_data_jdb is the most reliable indicator - it contains
+        # voltage, temperature, and battery % in nested form
+        # E1500LFP returns this with full data, E3600/E3800 do not
+        if "host_packet_data_jdb" in kv:
+            host_data = kv["host_packet_data_jdb"]
+            if isinstance(host_data, dict) and host_data:
+                # Check if it has actual voltage/temp data (not just empty dict)
+                has_voltage = host_data.get("host_packet_voltage", 0) > 0
+                has_temp = "host_packet_temp" in host_data
+                if has_voltage or has_temp:
                     return True
         
+        # Check for power data structures (E1500 has these, E3600/E3800 don't via local TCP)
+        power_structures = [
+            "ac_data_output_hm",
+            "dc_data_output_hm", 
+            "ac_data_input_hm",
+            "dc_data_input_hm",
+        ]
+        
+        for field in power_structures:
+            if field in kv:
+                value = kv[field]
+                if isinstance(value, dict) and value:
+                    return True
+        
+        # Check for top-level power fields
+        if kv.get("total_input_power", 0) > 0 or kv.get("total_output_power", 0) > 0:
+            return True
+        
+        # If we only have battery_percentage but nothing else, it's settings-only
+        # (E3800 returns this but it's not sufficient for complete telemetry)
         return False
 
     def _find_device(self, device_key: str) -> dict:
