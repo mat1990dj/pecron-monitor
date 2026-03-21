@@ -1,6 +1,6 @@
 # Pecron Battery Monitor
 
-**v0.5.6** · [Changelog](CHANGELOG.md)
+**v0.6.3** · [Changelog](CHANGELOG.md)
 
 Monitor and control Pecron portable power stations from the command line — no phone app required.
 
@@ -223,6 +223,18 @@ setup_wizard.py     — Interactive setup
 
 Don't see yours? It probably still works — `--setup` checks all known product keys automatically.
 
+### Connection Behavior by Model
+
+Most models return full telemetry over local TCP (WiFi). However, some LFP models behave differently:
+
+| Model | Local TCP | Cloud MQTT | Notes |
+|-------|-----------|------------|-------|
+| E1500LFP, F3000LFP | ✅ Full telemetry | ✅ Full telemetry | Best experience — works fully offline |
+| E3600LFP, E3800LFP | ⚠️ Settings only | ✅ Telemetry | Local TCP returns switch states only; battery/voltage/power comes via cloud MQTT |
+| WB12200 | ✅ Full telemetry | ✅ Full telemetry | Battery management system |
+
+For E3600/E3800 users: the monitor automatically detects settings-only local TCP data and falls back to cloud MQTT for telemetry. You'll see `Local TCP data is settings-only (telemetry from cloud)` in verbose logs — this is expected behavior, not an error.
+
 ## Troubleshooting
 
 **"Login failed"** — Check email/password. Google/Apple sign-in users need to set a password in the Pecron app first.
@@ -232,6 +244,8 @@ Don't see yours? It probably still works — `--setup` checks all known product 
 **"Cannot run in offline mode"** — Run `--setup` first (needs internet once to fetch encryption key).
 
 **Local TCP not connecting** — Verify `lan_ip` is correct and port 6607 is open: `nc -zv 192.168.1.100 6607`
+
+**E3600/E3800 showing 0V / no power data** — These models only report telemetry via cloud MQTT. Make sure the device is connected to the internet (check the Pecron app) and don't use `--local` mode.
 
 **Wrong model name** — Cosmetic issue from Pecron's cloud catalog. Run `--diagnose -v` if data isn't working.
 

@@ -4,6 +4,17 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] — 2026-03-21
+
+### Fixed
+- **E3600LFP / E3800LFP telemetry** — These models return only settings (switches, screen brightness) over local TCP, not battery/voltage/power data. Previously this blocked cloud MQTT telemetry from being processed, resulting in "0%" or no data. The monitor now detects settings-only local TCP responses and correctly falls back to cloud MQTT for telemetry. (#14)
+- **MQTT alternating packet accumulation** — Devices that send telemetry in alternating incomplete MQTT packets (battery % in one, power data in another) now accumulate properly before being displayed. Data is processed from the merged accumulator instead of individual packets.
+
+### Improved
+- **Connection behavior table** in README documenting per-model local TCP vs cloud MQTT capabilities
+- Clear debug logging: `Local TCP data is settings-only for [device] (telemetry from cloud)` instead of cryptic "Skipping invalid/empty data" messages
+- Cleaned up stale branches (fix/e3600-data, fix/state-caching-and-diagnostics)
+
 ## [0.6.2] — 2026-03-15
 
 ### Improved
