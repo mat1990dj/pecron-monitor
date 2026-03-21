@@ -384,6 +384,47 @@ class PecronMonitor:
     def _channel_id(self, device: dict) -> str:
         return f"qd{device['product_key']}{device['device_key']}"
 
+    def _has_telemetry_fields(self, kv: dict) -> bool:
+        """Check if data dict contains any telemetry fields (not just settings).
+        
+        E3600/E3800 local TCP returns ONLY settings fields (14 fields like 
+        ac_output_voltage_io, ac_output_frequency_io, noastime_io, ac_switch_hm, etc.)
+        but NO telemetry (battery_percentage, voltage, power, temperature).
+        
+        This method checks for key telemetry fields to determine if local data
+        should be treated as primary or if we need to rely on MQTT cloud data.
+        
+        Args:
+            kv: Data dict to check
+            
+        Returns:
+            True if data contains any telemetry fields, False if only settings
+        """
+        # Check for key telemetry fields
+        telemetry_indicators = [
+            "battery_percentage",
+            "host_packet_data_jdb",  # Contains voltage, temp, battery in nested form
+            "total_input_power",
+            "total_output_power",
+            "ac_data_output_hm",     # AC power data
+            "dc_data_output_hm",     # DC power data
+            "ac_data_input_hm",      # AC input data
+            "dc_data_input_hm",      # DC input data
+        ]
+        
+        for field in telemetry_indicators:
+            if field in kv:
+                value = kv[field]
+                # For nested dicts, check if they're non-empty
+                if isinstance(value, dict):
+                    if value:  # Non-empty dict
+                        return True
+                # For scalars, check if non-zero (battery_percentage, power fields)
+                elif value is not None and value != 0:
+                    return True
+        
+        return False
+
     def _find_device(self, device_key: str) -> dict:
         for d in self.devices:
             if d["device_key"] == device_key:
@@ -423,14 +464,21 @@ class PecronMonitor:
             kv = payload["data"].get("kv", {})
             if kv:
                 # Always merge MQTT data with existing local data
-                # This is essential for E3800LFP which sends incomplete local TCP packets
-                # (battery % in one, voltage/temp/power in MQTT cloud data)
+                # This is essential for E3600/E3800LFP which:
+                # 1. Send incomplete local TCP packets (only settings, no telemetry)
+                # 2. Send alternating MQTT packets (one with battery%, another with power)
+                # We merge all incoming data, then process from the accumulated state
                 if device_key in self._local_data_keys:
                     log.debug("Merging CLOUD MQTT data with existing local data for %s", device_key)
                 else:
                     log.debug("Processing CLOUD MQTT data for %s", device_key)
+                
                 self._merge_device_data(device_key, kv)
-                self._process_data(device_key, kv, source="CLOUD MQTT")
+                
+                # Process from the ACCUMULATED data, not just this message
+                # This ensures we have the complete picture after multiple partial packets
+                accumulated = self.latest_data.get(device_key, kv)
+                self._process_data(device_key, accumulated, source="CLOUD MQTT")
             else:
                 log.debug("bus_ message with empty kv: %s", list(payload["data"].keys()))
         elif topic_suffix == "onl_" and "data" in payload:
@@ -518,11 +566,17 @@ class PecronMonitor:
         if source in ("LOCAL TCP", "BLE") and remain <= 5 and battery_pct > 50:
             remain = -1  # Mark as invalid
 
-        # Skip processing if data is clearly invalid (no real reading)
-        if battery_pct < 0 and voltage == 0 and total_in == 0 and total_out == 0:
-            log.debug("Skipping invalid/empty data for %s (battery=%d%%, voltage=%.1fV)",
+        # Check if data looks incomplete (E3600/E3800 MQTT sends alternating packets)
+        # Don't immediately return — let the data accumulate in latest_data via merge
+        # Only skip the status log line to avoid spamming with incomplete readings
+        data_incomplete = battery_pct < 0 and voltage == 0 and total_in == 0 and total_out == 0
+        if data_incomplete:
+            log.debug("Skipping status log for %s (incomplete packet: battery=%d%%, voltage=%.1fV) — data will accumulate",
                       device_key, battery_pct, voltage)
-            return
+            # Still update HA bridge and check alerts with what we have
+            if self.ha_bridge:
+                self.ha_bridge.publish_state(device_key, kv)
+            return  # Skip status log and automation rules for incomplete data
 
         # Track data source — prefer local transports over cloud
         # If we already have a local source, don't let cloud overwrite it
@@ -811,7 +865,15 @@ class PecronMonitor:
                         if kv:
                             log.debug("Got status via BLE for %s", dk)
                             self._merge_device_data(dk, kv)
-                            self._local_data_keys.add(dk)  # Mark as local data
+                            
+                            # Only mark as local data if it contains telemetry fields
+                            has_telemetry = self._has_telemetry_fields(kv)
+                            if has_telemetry:
+                                self._local_data_keys.add(dk)  # Mark as local data
+                                log.debug("BLE data contains telemetry for %s", dk)
+                            else:
+                                log.debug("BLE data is settings-only for %s (telemetry from cloud)", dk)
+                            
                             self._process_data(dk, kv, source="BLE")
                             continue
                     except Exception as e:
@@ -853,7 +915,17 @@ class PecronMonitor:
                         if kv:
                             log.debug("Got status via LOCAL TCP for %s", dk)
                             self._merge_device_data(dk, kv)
-                            self._local_data_keys.add(dk)  # Mark as local data
+                            
+                            # Only mark as local data if it contains telemetry fields
+                            # E3600/E3800 local TCP returns ONLY settings (14 fields), no telemetry
+                            # We need to let MQTT cloud data be the primary source for these devices
+                            has_telemetry = self._has_telemetry_fields(kv)
+                            if has_telemetry:
+                                self._local_data_keys.add(dk)  # Mark as local data
+                                log.debug("Local TCP data contains telemetry for %s", dk)
+                            else:
+                                log.debug("Local TCP data is settings-only for %s (telemetry from cloud)", dk)
+                            
                             self._process_data(dk, kv, source="LOCAL TCP")
                             # Reset failure counter on successful read
                             self._local_connect_failures[dk] = 0
