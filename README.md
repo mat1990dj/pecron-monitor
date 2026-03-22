@@ -1,6 +1,6 @@
 # Pecron Battery Monitor
 
-**v0.5.6** · [Changelog](CHANGELOG.md)
+**v0.6.3** · [Changelog](CHANGELOG.md)
 
 Monitor and control Pecron portable power stations from the command line — no phone app required.
 
@@ -50,23 +50,33 @@ python3 pecron_monitor.py --dc off
 # Offline mode (no internet, uses local WiFi/BLE only)
 python3 pecron_monitor.py --local
 
+# Online only mode (uses internet, MQTT/REST transports)
+python3 pecron_monitor.py --nolocal
+
+# REST only mode (uses internet, REST transport only)
+python3 pecron_monitor.py --rest-only
+
 # See all available controls for your model
 python3 pecron_monitor.py --controls
 
-# Probe a control's supported values (tries 0,1,2,... until readback no longer matches)
-python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40
-
-# Start probing at a custom value
-python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-min 10 --probe-max 40
-
-# Probe over cloud only (skip local TCP/BLE setup)
-python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40 --nolocal
+# Set value for a specific control
+python3 pecron_monitor.py --control <name> <value>
 
 # Raw JSON dump (debugging)
 python3 pecron_monitor.py --raw
 
 # Diagnostics
-python3 pecron_monitor.py --diagnose -v
+python3 pecron_monitor.py --diagnose --verbose
+
+############
+# UNTESTED #
+############
+# Probe a control's supported values (tries 0,1,2,... until readback no longer matches)
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40
+# Start probing at a custom value
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-min 10 --probe-max 40
+# Probe over cloud only (skip local TCP/BLE setup)
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40 --nolocal
 ```
 
 ### Example Output
@@ -77,16 +87,21 @@ Device: AABBCCDDEEFF
 Connection: LOCAL TCP
 Data Quality: ✅ Full telemetry
 ==================================================
-Battery:       73%
-Voltage:       51.8V
-Temperature:   24°C
-Remaining:     8h 42m
-Total Input:   145W
-Total Output:  0W
-AC Output:     0W @ 120V
+Status:        Shut Down (0)
+Battery:       50%
+Voltage:       52.1V
+Temperature:   35°C
+Discharge time:2h 19m
+Charge time:   56h 6m
+Net Drain:     226.5W
+Total Input:   0W
+Total Output:  198W
+AC Output:     198W @ 122V
 DC Output:     0W
-AC Switch:     OFF
-DC Switch:     ON
+AC Input:      0W
+DC Input:      0W
+AC Switch:     ON
+DC Switch:     OFF
 UPS Mode:      OFF
 ```
 
