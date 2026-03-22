@@ -42,9 +42,10 @@ REGIONS = {
 # Known product name mappings
 # ---------------------------------------------------------------------------
 KNOWN_PRODUCTS = {
-    "E1500LFP": "E1500 LFP",
     "E300LFP": "E300 LFP",
     "E600LFP": "E600 LFP",
+    "E1000LFP": "E1000 LFP",
+    "E1500LFP": "E1500 LFP",
     "E2000LFP": "E2000 LFP",
     "E3000LFP": "E3000 LFP",
 }
@@ -55,7 +56,7 @@ KNOWN_PRODUCTS = {
 # The TSL is fetched dynamically; these are E1500LFP defaults as fallback.
 # ---------------------------------------------------------------------------
 DEFAULT_CONTROLS = {
-    # Common controls (E1500, E2000, E3000, WB12200)
+    # Common controls (E1000, E1500, E2000, E3000, WB12200)
     "ac_switch_hm":           {"id": 40, "type": "BOOL", "desc": "AC output", "access": "RW"},
     "dc_switch_hm":           {"id": 38, "type": "BOOL", "desc": "DC output", "access": "RW"},
     "ups_status_hm":          {"id": 27, "type": "BOOL", "desc": "UPS mode", "access": "RW"},
@@ -97,17 +98,22 @@ SENSOR_FIELDS = {
     "battery_temp": [("battery_temp",)],
     "charging_plate_temp": [("charging_plate_temp",)],
     "inverter_temp": [("inverter_temp",)],
-    "charge_status": [
-        ("host_packet_data_jdb", "host_packet_status"),
-    ],
+    "charge_status": [("host_packet_data_jdb", "host_packet_status")],
+    "ac_charging_power": [("ac_charging_power_ios",)],
     "total_input_power": [("total_input_power",)],
     "total_output_power": [("total_output_power",)],
     "remain_time": [("remain_time",)],
     "remain_charging_time": [("remain_charging_time",)],
+    # AC output voltage and frequency settings
+    "ac_output_voltage_setting": [("ac_output_voltage_io",),],
+    "ac_output_hz_setting": [("ac_output_frequency_io",),],
     "ac_output_power": [("ac_data_output_hm", "ac_output_power")],
-    "ac_output_voltage": [("ac_data_output_hm", "ac_output_voltage")],
+    "ac_output_voltage": [("ac_data_output_hm", "ac_output_voltage"),],
     "dc_output_power": [("dc_data_output_hm", "dc_output_power")],
-    "ac_input_power": [("ac_data_input_hm", "ac_power")],
+    "ac_input_power": [
+        ("ac_data_input_hm", "ac_input_power"),
+        ("ac_data_input_hm", "ac_power")
+    ],
     "dc_input_power": [("dc_data_input_hm", "dc_input_power")],
     # Per-port DC input (solar ports + barrel)
     "dc5521_input_voltage": [("dc_data_input_hm", "dc5521_input_voltage")],
@@ -120,7 +126,7 @@ SENSOR_FIELDS = {
     "gx16mf2_input_current": [("dc_data_input_hm", "gx16mf2_input_current")],
     "gx16mf2_input_power": [("dc_data_input_hm", "gx16mf2_input_power")],
     # AC output frequency and power factor (actual readings, not settings)
-    "ac_output_hz": [("ac_data_output_hm", "ac_output_hz")],
+    "ac_output_hz": [("ac_data_output_hm", "ac_output_hz"),],
     "ac_output_pf": [("ac_data_output_hm", "ac_output_pf")],
     "ac_switch": [("ac_switch_hm",), ("host_packet_data_jdb","host_packet_ac_switch"), ("host_packet_data_jdb","ac_switch")],
     "dc_switch": [("dc_switch_hm",), ("host_packet_data_jdb","host_packet_dc_switch"), ("host_packet_data_jdb","dc_switch")],
@@ -148,9 +154,6 @@ SENSOR_FIELDS = {
     "gx16mf2_input_voltage": [("dc_data_input_hm", "gx16mf2_input_voltage")],
     "gx16mf2_input_current": [("dc_data_input_hm", "gx16mf2_input_current")],
     "gx16mf2_input_power": [("dc_data_input_hm", "gx16mf2_input_power")],
-    # AC output actual readings (not settings)
-    "ac_output_hz": [("ac_data_output_hm", "ac_output_hz")],
-    "ac_output_pf": [("ac_data_output_hm", "ac_output_pf")],
 }
 
 # ---------------------------------------------------------------------------

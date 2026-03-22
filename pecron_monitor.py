@@ -14,11 +14,13 @@ Usage:
     python pecron_monitor.py --dc off       # Turn DC output off
     python pecron_monitor.py --controls     # List all available controls for your model
     python pecron_monitor.py --control ac_switch_hm on   # Set any control by code
+    python pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 20
+                                            # Probe valid values starting at 0
     python pecron_monitor.py --raw          # Dump raw JSON from device
     python pecron_monitor.py --homeassistant # Start with Home Assistant MQTT bridge
 """
 
-__version__ = "0.6.3"
+__version__ = "0.6.4"
 
 import argparse
 import json
@@ -47,8 +49,12 @@ def main():
     parser.add_argument("--auto", action="store_true", help="Auto mode for setup (reads PECRON_EMAIL, PECRON_PASSWORD, PECRON_REGION from env)")
     parser.add_argument("--local", action="store_true",
                         help="Run in offline/local-only mode (no cloud, uses cached config)")
+    parser.add_argument("--nolocal", action="store_true",
+                        help="Skip setting up local TCP/BLE transports in authenticate()")
     parser.add_argument("--no-ble", action="store_true",
                         help="Disable Bluetooth (BLE) transport — use WiFi TCP or cloud only")
+    parser.add_argument("--rest-only", action="store_true",
+                        help="Use REST API only (disable MQTT and local transports)")
     parser.add_argument("--status", action="store_true", help="One-shot status check")
     parser.add_argument("--ac", choices=["on", "off"], help="Turn AC output on/off")
     parser.add_argument("--dc", choices=["on", "off"], help="Turn DC output on/off")
@@ -57,6 +63,12 @@ def main():
     parser.add_argument("--controls", action="store_true", help="List available controls from TSL")
     parser.add_argument("--control", nargs=2, metavar=("CODE", "VALUE"),
                         help="Set any control: --control ac_switch_hm true")
+    parser.add_argument("--probe-control", metavar="CODE",
+                        help="Probe contiguous supported values for a control, starting at 0")
+    parser.add_argument("--probe-min", type=int, default=0,
+                        help="Minimum probe value when using --probe-control (default: 0)")
+    parser.add_argument("--probe-max", type=int, default=255,
+                        help="Maximum probe value when using --probe-control (default: 255)")
     parser.add_argument("--diagnose", action="store_true",
                         help="Run diagnostics: verify device binding, show MQTT topics, wait for data")
     parser.add_argument("--config", type=str, default=str(CONFIG_PATH), help="Config file path")
@@ -81,7 +93,7 @@ def main():
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    monitor = PecronMonitor(config, no_ble=args.no_ble)
+    monitor = PecronMonitor(config, no_ble=args.no_ble, rest_only=args.rest_only)
 
     def _signal_handler(sig, frame):
         monitor.stop()
@@ -111,8 +123,8 @@ def main():
         return
 
     if args.raw:
-        monitor = PecronMonitor(config, no_ble=args.no_ble)
-        monitor.authenticate()
+        monitor = PecronMonitor(config, no_ble=args.no_ble, rest_only=args.rest_only)
+        monitor.authenticate(force_offline=args.local, skip_local=args.nolocal)
         monitor.connect_mqtt()
         time.sleep(3)
         monitor._request_status()
@@ -132,6 +144,34 @@ def main():
                     path_str = str(field_paths) if isinstance(field_paths, (list, tuple)) else field_paths
                     print(f"{field_name:<30} {str(value):<15} {path_str}")
             
+            # Print unknown fields not referenced by SENSOR_FIELDS
+            def _collect_keys(p):
+                if isinstance(p, (list, tuple)):
+                    keys = []
+                    for sub in p:
+                        keys.extend(_collect_keys(sub))
+                    return keys
+                if isinstance(p, str):
+                    return [p]
+                return []
+
+            referenced = set()
+            for field_paths in SENSOR_FIELDS.values():
+                for k in _collect_keys(field_paths):
+                    referenced.add(k)
+
+            unknown_keys = [k for k in kv.keys() if k not in referenced]
+            if unknown_keys:
+                print(f"\n{'=' * 60}")
+                print("UNKNOWN FIELDS (not in SENSOR_FIELDS):")
+                print(f"{'=' * 60}")
+                for k in sorted(unknown_keys):
+                    try:
+                        val_str = json.dumps(kv[k], default=str)
+                    except Exception:
+                        val_str = str(kv[k])
+                    print(f"{k}: {val_str}")
+
             # Print full raw JSON
             print(f"\n{'=' * 60}")
             print("RAW JSON DATA:")
@@ -147,9 +187,9 @@ def main():
     if args.control:
         code, val = args.control
         # Parse value
-        if val.lower() in ("true", "on", "1"):
+        if val.lower() in ("true", "on"):
             parsed_val = True
-        elif val.lower() in ("false", "off", "0"):
+        elif val.lower() in ("false", "off"):
             parsed_val = False
         else:
             try:
@@ -157,8 +197,8 @@ def main():
             except ValueError:
                 print(f"Invalid value: {val}")
                 sys.exit(1)
-        monitor = PecronMonitor(config, no_ble=args.no_ble)
-        monitor.authenticate()
+        monitor = PecronMonitor(config, no_ble=args.no_ble, rest_only=args.rest_only)
+        monitor.authenticate(force_offline=args.local, skip_local=args.nolocal)
         monitor.connect_mqtt()
         time.sleep(3)
         for device in monitor.devices:
@@ -168,6 +208,51 @@ def main():
         time.sleep(5)
         for dk, kv in monitor.latest_data.items():
             print(f"Device {dk}: sent {code}={parsed_val}")
+        if monitor.mqtt_client:
+            monitor.mqtt_client.loop_stop()
+            monitor.mqtt_client.disconnect()
+        return
+
+    if args.probe_control:
+        if args.probe_max < args.probe_min:
+            print("--probe-max must be >= --probe-min")
+            sys.exit(1)
+
+        def _format_value_set(values):
+            if not values:
+                return "(none)"
+            if values == list(range(values[0], values[-1] + 1)):
+                if len(values) == 1:
+                    return str(values[0])
+                return f"{values[0]}-{values[-1]}"
+            return ", ".join(str(v) for v in values)
+
+        monitor = PecronMonitor(config, no_ble=args.no_ble, rest_only=args.rest_only)
+        monitor.authenticate(force_offline=args.local, skip_local=args.nolocal)
+        if not monitor.offline_mode:
+            monitor.connect_mqtt()
+            time.sleep(3)
+
+        print(f"Probing control '{args.probe_control}' from {args.probe_min} upward (max={args.probe_max})")
+        print(f"Mode: {'local-only' if args.local else ('cloud/remote (local skipped)' if args.nolocal else 'auto local+cloud')}")
+
+        for device in monitor.devices:
+            dk = device["device_key"]
+            result = monitor.probe_control_values(
+                dk,
+                args.probe_control,
+                min_value=args.probe_min,
+                max_value=args.probe_max,
+            )
+            valid = result["valid_values"]
+            print(f"\nDevice {dk}")
+            print(f"  Control: {args.probe_control}")
+            print(f"  Valid values: {_format_value_set(valid)}")
+            if result["reason"] == "max_reached":
+                print(f"  Stopped at: max probe value {args.probe_max}")
+            else:
+                print(f"  Stopped at: {result['stop_value']} (reason={result['reason']}, readback={result['last_readback']})")
+
         if monitor.mqtt_client:
             monitor.mqtt_client.loop_stop()
             monitor.mqtt_client.disconnect()
@@ -242,8 +327,8 @@ def main():
         # Step 4: MQTT test
         print("\n4. MQTT connectivity test...")
         print("   Connecting and waiting 15 seconds for data...\n")
-        monitor = PecronMonitor(config, no_ble=args.no_ble)
-        monitor.authenticate()
+        monitor = PecronMonitor(config, no_ble=args.no_ble, rest_only=args.rest_only)
+        monitor.authenticate(skip_local=args.nolocal)
         monitor.connect_mqtt()
         time.sleep(3)
         monitor._request_status()
@@ -288,7 +373,7 @@ def main():
             force_offline=args.local,
         )
     elif args.status:
-        monitor.status_once(force_offline=args.local)
+        monitor.status_once(force_offline=args.local, skip_local=args.nolocal)
     else:
         monitor.run(
             enable_ha=args.homeassistant or config.get("homeassistant", {}).get("enabled", False),

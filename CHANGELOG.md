@@ -4,6 +4,25 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 2026-03-22
+
+### Added / Changed
+- **E1000 support** tested against an E1000
+- **Transport selection** allow user to explicitly specify whether to use local, nolocal, rest-only or all transports for the given request (where appropriate), mostly for testing/debugging
+
+### Improved
+- Use device-cached `controls` mapping for local TTLV id→property conversion rather than fixed mapping (which was wrong for E1000).
+- Added detailed debug logging for local TTLV → kv mapping (per-field id→code, nested fields, array elements).
+- Extended info in Status output, including computed actual power flow to battery.
+
+### Fixed
+- **REST fallback** — Fixed the parsing of the REST response payload
+
+### Notes
+- Local setting of numeric value controls (like display brightness) isn't working for me on the E1000, not sure if it works on other models. Setting BOOL controls (line AC output) works OK.
+- The internal calculation of remaining charge/discharge times is broken in the E1000 at least, not sure about other models.
+  It seems to be using the delta between "input" and "output" power to compute the times, but the AC "input" doesn't include passthrough popwer, but the AC "output" does, massively skeping the reult.
+
 ## [0.6.3] — 2026-03-21
 
 ### Fixed
