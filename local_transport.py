@@ -628,6 +628,7 @@ class LocalTransport:
                     tag = (data_point_id << 3) | 2
                     raw_payload = struct.pack(">H", tag) + bytes([int(value)])
 
+                log.debug(f"Raw payload: "f"{raw_payload.hex()} (tag=0x{tag:04x})")
                 enc_payload = self._encrypt(raw_payload)
                 pkt = _ttlv_build_packet(0x0013, enc_payload, self._next_pid())
                 self._sock.sendall(pkt)

@@ -21,7 +21,7 @@ from helpers import _truthy, _get_kv, _get_kv_single
 from typing import Any, Optional
 from constants import DEVICE_STATUS_LABELS, REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS
 from cloud_api import (
-    login, resolve_devices, get_device_properties_rest
+    login, resolve_devices, get_device_properties_rest, set_device_property_rest
 )
 from protocol import build_ttlv_read, build_ttlv_write_bool, build_ttlv_write_enum
 
@@ -761,13 +761,25 @@ class PecronMonitor:
                 except Exception as e:
                     log.warning("TCP control failed: %s", e)
 
-        # Fall back to cloud MQTT
-        if self.mqtt_client is None:
-            log.debug("Cannot send control %s: no local transport connected and MQTT is unavailable (offline mode?)", control_code)
-            return False
-        self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
-        log.info("Sent %s=%s (type=%s) to %s via CLOUD", control_code, value, ctrl_type, device_key)
-        return True
+        # Fall back to cloud transports (MQTT primary, REST fallback)
+        # Normal mode: try MQTT first, REST as fallback
+        if self.mqtt_client is not None:
+            self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
+            log.info("Sent %s=%s (type=%s) to %s via CLOUD MQTT", control_code, value, ctrl_type, device_key)
+            return True
+
+        # MQTT not available, try REST API as fallback
+        if self.token_data:
+            if set_device_property_rest(
+                self.token_data["token"], self.region,
+                device["product_key"], device_key,
+                {control_code: value}
+            ):
+                log.info("Sent %s=%s to %s via CLOUD REST API", control_code, value, device_key)
+                return True
+
+        log.debug("Cannot send control %s: no cloud transport available", control_code)
+        return False
 
     def _extract_value_by_key(self, obj: Any, key: str):
         """Find first occurrence of a key in nested dict/list structures."""
@@ -852,9 +864,11 @@ class PecronMonitor:
                 break
 
             # Allow device to apply state before requesting readback.
-            time.sleep(1)
+            time.sleep(3)
+            # Clear only this device's cached reading before fresh readback
+            self.latest_data.pop(device_key, None)
             self._request_status()
-            time.sleep(2)
+            time.sleep(1)
 
             kv = self.latest_data.get(device_key, {})
             raw_readback = self._extract_value_by_key(kv, control_code)

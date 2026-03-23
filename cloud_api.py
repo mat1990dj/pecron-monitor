@@ -255,6 +255,44 @@ def get_device_properties_rest(token: str, region: dict, pk: str, dk: str) -> di
         return {}
 
 
+def set_device_property_rest(token: str, region: dict, pk: str, dk: str, properties: dict) -> bool:
+    """Set one or more device properties via REST API.
+
+    Args:
+        token: Bearer token from login().
+        region: Region dict from REGIONS.
+        pk: Product key.
+        dk: Device key.
+        properties: Dict of property_code -> value, e.g. {"ac_switch_hm": True}.
+
+    Returns:
+        True if the cloud accepted the command (code 200), False otherwise.
+    """
+    url = region["base_url"] + "/v2/binding/enduserapi/batchControlDevice"
+    data_list = [{code: value} for code, value in properties.items()]
+    body = {
+        "data": json.dumps(data_list),
+        "deviceList": [{"productKey": pk, "deviceKey": dk}],
+        "type": 2,
+    }
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=payload)
+    req.add_header("Authorization", token)
+    req.add_header("Content-Type", "application/json")
+    try:
+        log.debug("set_device_property_rest: POST %s body=%s", url, body)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        if result.get("code") != 200:
+            log.warning("set_device_property_rest failed: %s", result.get("msg", result))
+            return False
+        log.debug("set_device_property_rest OK: %s", result.get("data"))
+        return True
+    except Exception as e:
+        log.warning("set_device_property_rest request failed: %s", e)
+        return False
+
+
 def resolve_devices(config: dict, token: str, region: dict) -> list:
     catalog = get_product_catalog(token, region)
     devices = []

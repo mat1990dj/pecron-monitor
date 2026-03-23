@@ -68,9 +68,6 @@ python3 pecron_monitor.py --raw
 # Diagnostics
 python3 pecron_monitor.py --diagnose --verbose
 
-############
-# UNTESTED #
-############
 # Probe a control's supported values (tries 0,1,2,... until readback no longer matches)
 python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40
 # Start probing at a custom value

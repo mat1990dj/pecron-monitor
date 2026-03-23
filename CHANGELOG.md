@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This project use
 ### Added / Changed
 - **E1000 support** tested against an E1000
 - **Transport selection** allow user to explicitly specify whether to use local, nolocal, rest-only or all transports for the given request (where appropriate), mostly for testing/debugging
+- **Set control via REST** added ability to set a control value via REST interface.
 
 ### Improved
 - Use device-cached `controls` mapping for local TTLV id→property conversion rather than fixed mapping (which was wrong for E1000).
