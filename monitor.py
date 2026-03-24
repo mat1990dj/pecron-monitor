@@ -19,7 +19,7 @@ except ImportError:
 
 from helpers import _truthy, _get_kv, _get_kv_single
 from typing import Any, Optional
-from constants import DEVICE_STATUS_LABELS, REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS
+from constants import DEVICE_STATUS_LABELS, REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS, BATTERY_CAPACITY_WH
 from cloud_api import (
     login, resolve_devices, get_device_properties_rest, set_device_property_rest
 )
@@ -1285,6 +1285,24 @@ class PecronMonitor:
         log.info("Collecting data (waiting up to 15s for multi-packet devices like E3800)...")
         time.sleep(15)
 
+        def _norm_model_key(value: str) -> str:
+            return "".join(ch for ch in str(value).upper() if ch.isalnum())
+
+        capacity_lookup = {
+            _norm_model_key(model): float(capacity)
+            for model, capacity in BATTERY_CAPACITY_WH.items()
+        }
+
+        def _fmt_hours(hours: float) -> str:
+            if hours < 0:
+                return "N/A"
+            total_min = int(hours * 60)
+            days, rem = divmod(total_min, 24 * 60)
+            h, m = divmod(rem, 60)
+            if days > 0:
+                return f"{days}d {h}h {m}m"
+            return f"{h}h {m}m"
+
         for dk, kv in self.latest_data.items():
             source = self.data_sources.get(dk, "UNKNOWN")
 
@@ -1317,6 +1335,29 @@ class PecronMonitor:
             charge_remain = int(_get_kv(kv, SENSOR_FIELDS["remain_charging_time"], 0))
             charge_remain_str = f"{charge_remain // 60}h {charge_remain % 60}m" if charge_remain > 0 else "N/A"
 
+            # Compute estimated time-to-empty/full from capacity table + battery % + net battery power.
+            model_info = self._find_device(dk)
+            model_candidates = [
+                model_info.get("product_name", ""),
+                model_info.get("device_name", ""),
+            ]
+            capacity_wh = None
+            for candidate in model_candidates:
+                key = _norm_model_key(candidate)
+                if key in capacity_lookup:
+                    capacity_wh = capacity_lookup[key]
+                    break
+
+            est_time_str = "N/A"
+            if capacity_wh and 0 <= battery_pct <= 100:
+                current_charge_wh = capacity_wh * (battery_pct / 100.0)
+                net_power_w = net_drain  # <0 discharge, >0 charge
+                if net_power_w != 0:
+                    if net_power_w < 0:
+                        est_time_str = _fmt_hours(current_charge_wh / abs(net_power_w))
+                    else:
+                        est_time_str = _fmt_hours((capacity_wh - current_charge_wh) / net_power_w)
+
             status_value = int(_get_kv(kv, SENSOR_FIELDS["device_status_hm"], -1))
             status_str = DEVICE_STATUS_LABELS.get(int(status_value), str(status_value)) if status_value >= 0 else "Unknown"
 
@@ -1331,6 +1372,14 @@ class PecronMonitor:
             print(f"Discharge time:{remain_str}")
             print(f"Charge time:   {charge_remain_str}")
             print(f"{net_drain_label}    {abs(net_drain):.1f}W")
+            if capacity_wh:
+                print(f"Capacity:      {capacity_wh:.0f}Wh")
+                if net_drain < 0:
+                    print(f"Est. Empty:    {est_time_str}")
+                elif net_drain > 0:
+                    print(f"Est. Full:     {est_time_str}")
+            else:
+                print("Capacity:      Unknown (not in BATTERY_CAPACITY_WH)")
             print(f"Total Input:   {total_in}W")
             print(f"Total Output:  {total_out}W")
             print(f"AC Output:     {_get_kv(kv, SENSOR_FIELDS['ac_output_power'], 0)}W @ {_get_kv(kv, SENSOR_FIELDS['ac_output_voltage'], '?')}V")

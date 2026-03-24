@@ -50,6 +50,21 @@ KNOWN_PRODUCTS = {
     "E3000LFP": "E3000 LFP",
 }
 
+BATTERY_CAPACITY_WH = {
+    "E300LFP": "288",
+    "E500LFP": "576",
+    "E600LFP": "614",
+    "F1000LFP": "1004",
+    "E1000LFP": "1024",
+    "E1500LFP": "1536",
+    "E2000LFP": "1920",
+    "E2400LFP": "2048",
+    "F3000LFP": "3072",
+    "E3600LFP": "3072",
+    "E3800LFP": "3840",
+    "F5000LFP": "5120",
+}
+
 # ---------------------------------------------------------------------------
 # Data point IDs (from Quectel TSL — Thing Specification Language)
 # These are universal for each Pecron product model.
