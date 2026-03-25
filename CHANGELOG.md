@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This project use
 ### Notes
 - Local setting of numeric value controls (like display brightness) isn't working for me on the E1000, not sure if it works on other models. Setting BOOL controls (line AC output) works OK.
 - The internal calculation of remaining charge/discharge times is broken in the E1000 at least, not sure about other models.
-  It seems to be using the delta between "input" and "output" power to compute the times, but the AC "input" doesn't include passthrough popwer, but the AC "output" does, massively skeping the reult.
+  It seems to be using the delta between "input" and "output" power to compute the times, but the AC "input" doesn't include passthrough power, but the AC "output" does, massively skewing the result.
 
 ## [0.6.3] — 2026-03-21
 

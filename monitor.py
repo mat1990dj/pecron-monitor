@@ -573,10 +573,10 @@ class PecronMonitor:
                     pack["charging_pack_battery"] = pack_status
                     pack["charging_pack_status"] = 0
                     log.debug("Swapped charging_pack fields: battery was 0, using status=%d%%", pack_status)
-                if pack_status == 0 and 5 <= pack_battery <= 100:
+                elif pack_status == 0 and 5 <= pack_battery <= 100:
                     pack["charging_pack_status"] = pack_battery
                     pack["charging_pack_battery"] = 0
-                    log.debug("Swapped charging_pack fields: status was 0, using status=%d%%", pack_battery)
+                    log.debug("Swapped charging_pack fields: status was 0, using battery=%d%% as status", pack_battery)
 
         battery_pct = int(_get_kv(kv, SENSOR_FIELDS["battery_percent"], -1))
         voltage = float(_get_kv(kv, SENSOR_FIELDS["voltage"], 0))

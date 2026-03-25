@@ -159,16 +159,6 @@ SENSOR_FIELDS = {
     "current": [
         ("host_packet_data_jdb", "host_packet_current"),
     ],
-    # Per-port DC input (solar ports + barrel jack)
-    "dc5521_input_voltage": [("dc_data_input_hm", "dc5521_input_voltage")],
-    "dc5521_input_current": [("dc_data_input_hm", "dc5521_input_current")],
-    "dc5521_input_power": [("dc_data_input_hm", "dc5521_input_power")],
-    "gx16mf1_input_voltage": [("dc_data_input_hm", "gx16mf1_input_voltage")],
-    "gx16mf1_input_current": [("dc_data_input_hm", "gx16mf1_input_current")],
-    "gx16mf1_input_power": [("dc_data_input_hm", "gx16mf1_input_power")],
-    "gx16mf2_input_voltage": [("dc_data_input_hm", "gx16mf2_input_voltage")],
-    "gx16mf2_input_current": [("dc_data_input_hm", "gx16mf2_input_current")],
-    "gx16mf2_input_power": [("dc_data_input_hm", "gx16mf2_input_power")],
 }
 
 # ---------------------------------------------------------------------------
@@ -190,14 +180,6 @@ DEVICE_STATUS_LABELS = {
     3: "AC Discharge",
     4: "Standby",
     5: "Conservation",
-}
-
-PACK_STATUS_LABELS = {
-    0: "No Charge",
-    1: "Cascade Charging",
-    2: "Balance No Charge",
-    3: "Balanced Charging",
-    4: "No Connection",
 }
 
 # WB12200 charge limit voltage (enum index → actual voltage)
