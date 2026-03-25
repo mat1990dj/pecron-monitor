@@ -20,7 +20,7 @@ Usage:
     python pecron_monitor.py --homeassistant # Start with Home Assistant MQTT bridge
 """
 
-__version__ = "0.6.4"
+__version__ = "0.6.5"
 
 import argparse
 import json
@@ -127,6 +127,10 @@ def main():
         monitor.authenticate(force_offline=args.local, skip_local=args.nolocal)
         monitor.connect_mqtt()
         time.sleep(3)
+        # Enable high-freq reporting for devices that need it (E3600/E3800)
+        if monitor.mqtt_client:
+            monitor._enable_high_freq_reporting()
+            time.sleep(2)  # Give device time to switch modes
         monitor._request_status()
         time.sleep(5)
         for dk, kv in monitor.latest_data.items():

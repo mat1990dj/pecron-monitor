@@ -494,6 +494,7 @@ class PecronMonitor:
 
         if topic_suffix == "bus_" and "data" in payload:
             kv = payload["data"].get("kv", {})
+            log.debug("MQTT kv keys for %s: %s", device_key, list(kv.keys()))
             if kv:
                 # Always merge MQTT data with existing local data
                 # This is essential for E3600/E3800LFP which:
@@ -1278,12 +1279,27 @@ class PecronMonitor:
         if not self.offline_mode:
             self.connect_mqtt()
             time.sleep(3)
+            # Enable high-freq reporting for devices that need it (E3600/E3800)
+            if self.mqtt_client:
+                self._enable_high_freq_reporting()
+                time.sleep(2)  # Give device time to switch modes
         self._request_status()
         # E3800LFP sends data in multiple MQTT packets with different shapes
         # (voltage in one, battery_percentage in another, power in a third)
         # Wait longer to collect all packet shapes for complete data
         log.info("Collecting data (waiting up to 15s for multi-packet devices like E3800)...")
         time.sleep(15)
+
+        # Check if any device still lacks telemetry — try a second round
+        incomplete_devices = []
+        for dk, kv in self.latest_data.items():
+            if not self._has_telemetry_fields(kv):
+                incomplete_devices.append(dk)
+        if incomplete_devices:
+            log.info("Devices still missing telemetry: %s — requesting again (waiting 15s more)...",
+                     ", ".join(incomplete_devices))
+            self._request_status()
+            time.sleep(15)
 
         def _norm_model_key(value: str) -> str:
             return "".join(ch for ch in str(value).upper() if ch.isalnum())

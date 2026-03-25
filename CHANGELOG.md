@@ -4,6 +4,15 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.5] — 2026-03-25
+
+### Fixed
+- **`--status` and `--raw` modes now enable high-frequency reporting** before requesting data, matching continuous monitor behavior. This should fix E3600LFP and similar devices that only send telemetry when high-freq mode is active. (#14)
+
+### Improved
+- **MQTT debug logging** now shows kv field names for each received packet
+- **`--status` automatically retries** if devices have incomplete telemetry after initial wait (up to 30s total for slow-reporting devices)
+
 ## [0.6.4] — 2026-03-25
 
 ### Added / Changed
