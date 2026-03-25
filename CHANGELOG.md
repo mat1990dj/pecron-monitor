@@ -4,7 +4,7 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 2026-03-22
+## [0.6.4] — 2026-03-25
 
 ### Added / Changed
 - **E1000 support** tested against an E1000
