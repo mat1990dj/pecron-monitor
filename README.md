@@ -1,6 +1,6 @@
 # Pecron Battery Monitor
 
-**v0.6.3** · [Changelog](CHANGELOG.md)
+**v0.6.5** · [Changelog](CHANGELOG.md)
 
 Monitor and control Pecron portable power stations from the command line — no phone app required.
 
