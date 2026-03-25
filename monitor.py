@@ -430,7 +430,10 @@ class PecronMonitor:
             host_data = kv["host_packet_data_jdb"]
             if isinstance(host_data, dict) and host_data:
                 # Check if it has actual voltage/temp data (not just empty dict)
-                has_voltage = host_data.get("host_packet_voltage", 0) > 0
+                try:
+                    has_voltage = float(host_data.get("host_packet_voltage", 0)) > 0
+                except (ValueError, TypeError):
+                    has_voltage = False
                 has_temp = "host_packet_temp" in host_data
                 if has_voltage or has_temp:
                     return True
