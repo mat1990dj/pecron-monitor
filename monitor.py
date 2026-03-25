@@ -18,9 +18,10 @@ except ImportError:
     mqtt = None
 
 from helpers import _truthy, _get_kv, _get_kv_single
-from constants import REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS
+from typing import Any, Optional
+from constants import DEVICE_STATUS_LABELS, REGIONS, DEFAULT_CONTROLS, SENSOR_FIELDS, BATTERY_CAPACITY_WH
 from cloud_api import (
-    login, resolve_devices, get_device_properties_rest
+    login, resolve_devices, get_device_properties_rest, set_device_property_rest
 )
 from protocol import build_ttlv_read, build_ttlv_write_bool, build_ttlv_write_enum
 
@@ -40,7 +41,7 @@ log = logging.getLogger("pecron")
 
 
 class PecronMonitor:
-    def __init__(self, config: dict, no_ble: bool = False):
+    def __init__(self, config: dict, no_ble: bool = False, rest_only: bool = False):
         self.config = config
         self.region = REGIONS[config["region"]]
         self.token_data = None
@@ -56,6 +57,7 @@ class PecronMonitor:
         self.ble_transports = {}   # device_key → BLETransport
         self.offline_mode = False  # Set to True when running in local-only mode
         self.no_ble = no_ble  # Skip BLE transport entirely
+        self.rest_only = rest_only  # If True, disable MQTT and local transports; use REST API only
         self._local_data_keys = set()  # Track which device_keys got local data this polling cycle
 
         # Automation rules
@@ -64,6 +66,8 @@ class PecronMonitor:
         # TCP reconnection tracking (prevent cascading E3800LFP lockout)
         self._local_connect_failures = {}  # device_key → consecutive failure count
         self._last_connect_attempt = {}    # device_key → timestamp of last attempt
+        # Option to skip setting up local transports (set by authenticate skip_local)
+        self.skip_local_setup = False
 
     def _next_packet_id(self) -> int:
         self._packet_id = (self._packet_id + 1) % 65535
@@ -114,7 +118,7 @@ class PecronMonitor:
             # Update with new value
             existing[key] = value
 
-    def authenticate(self, force_offline: bool = False):
+    def authenticate(self, force_offline: bool = False, skip_local: Optional[bool] = None):
         """Authenticate and set up transports.
 
         Args:
@@ -123,6 +127,14 @@ class PecronMonitor:
         """
         # Check if we can run fully offline
         can_offline = self._check_offline_capable()
+
+        # Honor skip_local flag for this monitor instance (only if provided)
+        if skip_local is not None:
+            self.skip_local_setup = bool(skip_local)
+
+        # If running in REST-only mode, always skip local transports
+        if self.rest_only:
+            self.skip_local_setup = True
 
         if force_offline:
             if not can_offline:
@@ -144,7 +156,8 @@ class PecronMonitor:
                 self.devices = resolve_devices(self.config, self.token_data["token"], self.region)
                 if not self.devices:
                     raise RuntimeError("No valid devices found.")
-                self._setup_local_transports()
+                if not self.skip_local_setup:
+                    self._setup_local_transports()
             except Exception as e:
                 log.warning("Cloud login failed (%s), falling back to offline mode", e)
                 self.offline_mode = True
@@ -158,7 +171,8 @@ class PecronMonitor:
             self.devices = resolve_devices(self.config, self.token_data["token"], self.region)
             if not self.devices:
                 raise RuntimeError("No valid devices found.")
-            self._setup_local_transports()
+            if not self.skip_local_setup:
+                self._setup_local_transports()
 
     def _check_offline_capable(self) -> bool:
         """Check if all devices have the required fields for offline operation."""
@@ -201,7 +215,8 @@ class PecronMonitor:
         # Set up local transports (TCP + BLE)
         if self.no_ble:
             log.info("BLE disabled (--no-ble flag)")
-        self._setup_local_transports()
+        if not self.skip_local_setup:
+            self._setup_local_transports()
 
     def _setup_local_transports(self):
         """Set up local TCP and BLE transports for devices with lan_ip/ble in config."""
@@ -252,7 +267,9 @@ class PecronMonitor:
                         else:
                             log.warning("No auth key for %s and no cloud token to fetch one", dk)
                             continue
-                    self.local_transports[dk] = LocalTransport(lan_ip, auth_key)
+                    self.local_transports[dk] = LocalTransport(lan_ip, auth_key,
+                                                               device_key=dk,
+                                                               controls=device.get('controls', DEFAULT_CONTROLS))
                     log.info("Local transport configured for %s @ %s", dk, lan_ip)
                 except Exception as e:
                     log.warning("Failed to set up local transport for %s: %s", dk, e)
@@ -281,7 +298,8 @@ class PecronMonitor:
                         )
                     if auth_key:
                         self.ble_transports[dk] = BLETransport(
-                            auth_key, device_address=ble_addr, device_key=dk
+                            auth_key, device_address=ble_addr, device_key=dk,
+                            controls=device.get('controls', DEFAULT_CONTROLS)
                         )
                         log.info("BLE transport configured for %s%s", dk,
                                  f" @ {ble_addr}" if ble_addr else " (will scan)")
@@ -327,7 +345,9 @@ class PecronMonitor:
                     cfg["lan_ip"] = new_ip
                     # Re-create transport with new IP
                     from local_transport import LocalTransport
-                    self.local_transports[device_key] = LocalTransport(new_ip, cfg["auth_key"])
+                    self.local_transports[device_key] = LocalTransport(new_ip, cfg["auth_key"],
+                                                                       device_key=device_key,
+                                                                       controls=self._find_device(device_key).get('controls', DEFAULT_CONTROLS))
                     return True
                 else:
                     log.debug("Device %s still at same IP %s", device_key, new_ip)
@@ -548,10 +568,15 @@ class PecronMonitor:
                 # If battery is 0 and status looks like a percentage (>4), swap them
                 # Status enum: 0=no charge, 1=cascade charging, 2=balance no charge,
                 #              3=balanced charging, 4=no connection — NOT percentages
+                # Also swap in the other direction if needed
                 if pack_battery == 0 and 5 <= pack_status <= 100:
                     pack["charging_pack_battery"] = pack_status
                     pack["charging_pack_status"] = 0
                     log.debug("Swapped charging_pack fields: battery was 0, using status=%d%%", pack_status)
+                elif pack_status == 0 and 5 <= pack_battery <= 100:
+                    pack["charging_pack_status"] = pack_battery
+                    pack["charging_pack_battery"] = 0
+                    log.debug("Swapped charging_pack fields: status was 0, using battery=%d%% as status", pack_battery)
 
         battery_pct = int(_get_kv(kv, SENSOR_FIELDS["battery_percent"], -1))
         voltage = float(_get_kv(kv, SENSOR_FIELDS["voltage"], 0))
@@ -736,13 +761,136 @@ class PecronMonitor:
                 except Exception as e:
                     log.warning("TCP control failed: %s", e)
 
-        # Fall back to cloud MQTT
-        if self.mqtt_client is None:
-            log.debug("Cannot send control %s: no local transport connected and MQTT is unavailable (offline mode?)", control_code)
-            return False
-        self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
-        log.info("Sent %s=%s (type=%s) to %s via CLOUD", control_code, value, ctrl_type, device_key)
-        return True
+        # Fall back to cloud transports (MQTT primary, REST fallback)
+        # Normal mode: try MQTT first, REST as fallback
+        if self.mqtt_client is not None:
+            self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
+            log.info("Sent %s=%s (type=%s) to %s via CLOUD MQTT", control_code, value, ctrl_type, device_key)
+            return True
+
+        # MQTT not available, try REST API as fallback
+        if self.token_data:
+            if set_device_property_rest(
+                self.token_data["token"], self.region,
+                device["product_key"], device_key,
+                {control_code: value}
+            ):
+                log.info("Sent %s=%s to %s via CLOUD REST API", control_code, value, device_key)
+                return True
+
+        log.debug("Cannot send control %s: no cloud transport available", control_code)
+        return False
+
+    def _extract_value_by_key(self, obj: Any, key: str):
+        """Find first occurrence of a key in nested dict/list structures."""
+        if isinstance(obj, dict):
+            if key in obj:
+                return obj[key]
+            for value in obj.values():
+                found = self._extract_value_by_key(value, key)
+                if found is not None:
+                    return found
+        elif isinstance(obj, list):
+            for item in obj:
+                found = self._extract_value_by_key(item, key)
+                if found is not None:
+                    return found
+        return None
+
+    def _normalize_probe_readback(self, value):
+        """Normalize readback values for robust integer comparison."""
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ("on", "true", "enabled"):
+                return 1
+            if lowered in ("off", "false", "disabled"):
+                return 0
+            try:
+                return int(float(lowered))
+            except ValueError:
+                return None
+        return None
+
+    def probe_control_values(self, device_key: str, control_code: str,
+                             min_value: int = 0, max_value: int = 255) -> dict:
+        """Probe supported control values from min_value upward with set-then-readback validation.
+
+        For each candidate value:
+        1) Send control value
+        2) Request status
+        3) Read back same control key
+        4) Continue while readback equals candidate value
+
+        Returns probe details including the contiguous valid value set.
+        """
+        device = self._find_device(device_key)
+        if not device:
+            return {
+                "device_key": device_key,
+                "control_code": control_code,
+                "valid_values": [],
+                "stop_value": 0,
+                "last_readback": None,
+                "reason": "device_not_found",
+            }
+
+        controls = device.get("controls", DEFAULT_CONTROLS)
+        ctrl = controls.get(control_code)
+        if not ctrl:
+            return {
+                "device_key": device_key,
+                "control_code": control_code,
+                "valid_values": [],
+                "stop_value": 0,
+                "last_readback": None,
+                "reason": "control_not_found",
+            }
+
+        valid_values = []
+        stop_value = min_value
+        last_readback = None
+        reason = "readback_mismatch"
+
+        for candidate in range(min_value, max_value + 1):
+            stop_value = candidate
+
+            sent = self.send_control(device_key, control_code, candidate)
+            if not sent:
+                reason = "send_failed"
+                break
+
+            # Allow device to apply state before requesting readback.
+            time.sleep(3)
+            # Clear only this device's cached reading before fresh readback
+            self.latest_data.pop(device_key, None)
+            self._request_status()
+            time.sleep(1)
+
+            kv = self.latest_data.get(device_key, {})
+            raw_readback = self._extract_value_by_key(kv, control_code)
+            normalized_readback = self._normalize_probe_readback(raw_readback)
+            last_readback = raw_readback
+
+            if normalized_readback != candidate:
+                reason = "readback_mismatch"
+                break
+
+            valid_values.append(candidate)
+        else:
+            reason = "max_reached"
+
+        return {
+            "device_key": device_key,
+            "control_code": control_code,
+            "valid_values": valid_values,
+            "stop_value": stop_value,
+            "last_readback": last_readback,
+            "reason": reason,
+        }
 
     # Convenience aliases
     def send_bool_control(self, device_key: str, control_code: str, value: bool):
@@ -981,6 +1129,10 @@ class PecronMonitor:
             log.info("Offline mode — skipping MQTT connection")
             return
 
+        if getattr(self, "rest_only", False):
+            log.info("REST-only mode — skipping MQTT connection")
+            return
+
         client_id = f"qu_{self.token_data['uid']}_{int(time.time() * 1000)}"
         self.mqtt_client = mqtt.Client(
             client_id=client_id, transport="websockets",
@@ -1121,8 +1273,8 @@ class PecronMonitor:
             self.mqtt_client.loop_stop()
             self.mqtt_client.disconnect()
 
-    def status_once(self, force_offline: bool = False):
-        self.authenticate(force_offline=force_offline)
+    def status_once(self, force_offline: bool = False, skip_local: Optional[bool] = None):
+        self.authenticate(force_offline=force_offline, skip_local=skip_local)
         if not self.offline_mode:
             self.connect_mqtt()
             time.sleep(3)
@@ -1133,8 +1285,25 @@ class PecronMonitor:
         log.info("Collecting data (waiting up to 15s for multi-packet devices like E3800)...")
         time.sleep(15)
 
+        def _norm_model_key(value: str) -> str:
+            return "".join(ch for ch in str(value).upper() if ch.isalnum())
+
+        capacity_lookup = {
+            _norm_model_key(model): float(capacity)
+            for model, capacity in BATTERY_CAPACITY_WH.items()
+        }
+
+        def _fmt_hours(hours: float) -> str:
+            if hours < 0:
+                return "N/A"
+            total_min = int(hours * 60)
+            days, rem = divmod(total_min, 24 * 60)
+            h, m = divmod(rem, 60)
+            if days > 0:
+                return f"{days}d {h}h {m}m"
+            return f"{h}h {m}m"
+
         for dk, kv in self.latest_data.items():
-            remain = int(_get_kv(kv, SENSOR_FIELDS["remain_time"], 0))
             source = self.data_sources.get(dk, "UNKNOWN")
 
             # Compute total power with AC+DC fallback
@@ -1151,21 +1320,66 @@ class PecronMonitor:
                 if ac_out + dc_out > 0:
                     total_out = ac_out + dc_out
 
+            # Compute net power drain on host battery
+            net_drain = float(_get_kv(kv, SENSOR_FIELDS["voltage"], 0)) * float(_get_kv(kv, SENSOR_FIELDS["current"], 0))
+            net_drain_label = f"Net Drain: " if net_drain < 0 else "Net Charge:"
+
+            remain = int(_get_kv(kv, SENSOR_FIELDS["remain_time"], 0))
             # Check if remain_time is unreliable (local transports often return bogus values)
             battery_pct = int(_get_kv(kv, SENSOR_FIELDS["battery_percent"], -1))
             if source in ("LOCAL TCP", "BLE") and remain <= 5 and battery_pct > 50:
                 remain_str = "N/A (unreliable from local)"
             else:
-                remain_str = f"{remain // 60}h {remain % 60}m"
+                remain_str = f"{remain // 60}h {remain % 60}m" if remain > 0 else "N/A"
+
+            charge_remain = int(_get_kv(kv, SENSOR_FIELDS["remain_charging_time"], 0))
+            charge_remain_str = f"{charge_remain // 60}h {charge_remain % 60}m" if charge_remain > 0 else "N/A"
+
+            # Compute estimated time-to-empty/full from capacity table + battery % + net battery power.
+            model_info = self._find_device(dk)
+            model_candidates = [
+                model_info.get("product_name", ""),
+                model_info.get("device_name", ""),
+            ]
+            capacity_wh = None
+            for candidate in model_candidates:
+                key = _norm_model_key(candidate)
+                if key in capacity_lookup:
+                    capacity_wh = capacity_lookup[key]
+                    break
+
+            est_time_str = "N/A"
+            if capacity_wh and 0 <= battery_pct <= 100:
+                current_charge_wh = capacity_wh * (battery_pct / 100.0)
+                net_power_w = net_drain  # <0 discharge, >0 charge
+                if net_power_w != 0:
+                    if net_power_w < 0:
+                        est_time_str = _fmt_hours(current_charge_wh / abs(net_power_w))
+                    else:
+                        est_time_str = _fmt_hours((capacity_wh - current_charge_wh) / net_power_w)
+
+            status_value = int(_get_kv(kv, SENSOR_FIELDS["device_status_hm"], -1))
+            status_str = DEVICE_STATUS_LABELS.get(int(status_value), str(status_value)) if status_value >= 0 else "Unknown"
 
             print(f"\n{'=' * 50}")
             print(f"Device: {dk}")
             print(f"Connection: {source}")
             print(f"{'=' * 50}")
+            print(f"Status:        {status_str} ({status_value})")
             print(f"Battery:       {_get_kv(kv, SENSOR_FIELDS['battery_percent'], '?')}%")
             print(f"Voltage:       {float(_get_kv(kv, SENSOR_FIELDS['voltage'], 0)):.1f}V")
             print(f"Temperature:   {_get_kv(kv, SENSOR_FIELDS['temperature'], '?')}°C")
-            print(f"Remaining:     {remain_str}")
+            print(f"Discharge time:{remain_str}")
+            print(f"Charge time:   {charge_remain_str}")
+            print(f"{net_drain_label}    {abs(net_drain):.1f}W")
+            if capacity_wh:
+                print(f"Capacity:      {capacity_wh:.0f}Wh")
+                if net_drain < 0:
+                    print(f"Est. Empty:    {est_time_str}")
+                elif net_drain > 0:
+                    print(f"Est. Full:     {est_time_str}")
+            else:
+                print("Capacity:      Unknown (not in BATTERY_CAPACITY_WH)")
             print(f"Total Input:   {total_in}W")
             print(f"Total Output:  {total_out}W")
             print(f"AC Output:     {_get_kv(kv, SENSOR_FIELDS['ac_output_power'], 0)}W @ {_get_kv(kv, SENSOR_FIELDS['ac_output_voltage'], '?')}V")

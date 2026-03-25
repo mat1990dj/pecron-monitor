@@ -227,13 +227,25 @@ TSL_STRUCT = {
 # etc. So we rebuild that same nested dict structure.
 
 
-def _fields_to_kv(fields: list) -> dict:
+def _fields_to_kv(fields: list, controls: dict = None) -> dict:
     """Convert parsed TTLV fields into the nested kv dict matching MQTT format."""
     kv = {}
     i = 0
+    # Build id -> code mapping from provided controls when available
+    id_to_code = {}
+    if controls:
+        try:
+            for code, info in controls.items():
+                cid = info.get("id")
+                if isinstance(cid, int):
+                    id_to_code[cid] = code
+        except Exception:
+            id_to_code = {}
+
     while i < len(fields):
         fid, ftype, fval = fields[i]
-        code = TSL_TOP.get(fid)
+        # Prefer device-specific controls mapping, fall back to TSL_TOP
+        code = id_to_code.get(fid, TSL_TOP.get(fid))
 
         if code is None:
             i += 1
@@ -311,8 +323,8 @@ def _fields_to_kv(fields: list) -> dict:
 
 class LocalTransport:
     """TCP transport for Pecron devices on LAN (port 6607)."""
-
-    def __init__(self, device_ip: str, auth_key_b64: str, timeout: float = 10.0):
+    def __init__(self, device_ip: str, auth_key_b64: str, timeout: float = 10.0,
+                 device_key: str = None, controls: dict = None):
         self.device_ip = device_ip
         self.device_port = 6607
         self.auth_key = base64.b64decode(auth_key_b64)
@@ -326,6 +338,9 @@ class LocalTransport:
         self._lock = threading.Lock()
         self._connected = False
         self._has_connected_once = False
+        # Optional device-scoped controls mapping (code->info) used for id->code lookup
+        self.device_key = device_key
+        self.controls = controls
 
     @property
     def connected(self) -> bool:
@@ -590,7 +605,7 @@ class LocalTransport:
                         return {}
 
                 log.debug("Collected %d total fields from %d packets", len(all_fields), packets_read)
-                kv = _fields_to_kv(all_fields)
+                kv = _fields_to_kv(all_fields, controls=self.controls)
                 return kv
 
             except Exception as e:
@@ -613,6 +628,7 @@ class LocalTransport:
                     tag = (data_point_id << 3) | 2
                     raw_payload = struct.pack(">H", tag) + bytes([int(value)])
 
+                log.debug("Raw payload: %s (tag=0x%04x)", raw_payload.hex(), tag)
                 enc_payload = self._encrypt(raw_payload)
                 pkt = _ttlv_build_packet(0x0013, enc_payload, self._next_pid())
                 self._sock.sendall(pkt)
@@ -654,7 +670,8 @@ class BLETransport:
     """
 
     def __init__(self, auth_key_b64: str, device_address: str = None,
-                 device_key: str = None, scan_timeout: float = 10.0):
+                 device_key: str = None, scan_timeout: float = 10.0,
+                 controls: dict = None):
         if not HAS_BLE:
             raise ImportError("pexpect is required for BLE transport: pip install pexpect")
 
@@ -674,6 +691,8 @@ class BLETransport:
         self._lock = threading.Lock()
         self._connected = False
         self._has_connected_once = False
+        # Optional device controls mapping for id->code lookup
+        self.controls = controls
 
     @property
     def connected(self) -> bool:
@@ -944,7 +963,7 @@ class BLETransport:
                     return {}
 
                 log.debug("BLE: collected %d fields total", len(all_fields))
-                return _fields_to_kv(all_fields)
+                return _fields_to_kv(all_fields, controls=self.controls)
 
             except Exception as e:
                 log.error("BLE read failed: %s", e)

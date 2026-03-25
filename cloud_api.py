@@ -180,12 +180,14 @@ def get_device_properties_rest(token: str, region: dict, pk: str, dk: str) -> di
     req = urllib.request.Request(url)
     req.add_header("Authorization", token)
     try:
+        log.debug("REST URL: '%s'", url)
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read())
         if body.get("code") != 200:
             log.debug("REST properties failed: %s", body.get("msg", body))
             return {}
 
+        log.debug("REST response body:\n%s", json.dumps(body, indent=2, ensure_ascii=False))
         tsl_info = body.get("data", {}).get("customizeTslInfo", [])
         if not tsl_info:
             log.debug("REST properties returned empty TSL info")
@@ -194,31 +196,101 @@ def get_device_properties_rest(token: str, region: dict, pk: str, dk: str) -> di
         # Convert TSL info array to kv dict matching MQTT format
         kv = {}
         for item in tsl_info:
-            code = item.get("code", "")
-            value = item.get("value")
+            code = item.get("resourceCode", "")
+            value = item.get("resourceValce", "") # Note: 'resourceValce' is correct per API response, not a typo
+            dtype = item.get("dataType", "string")
 
-            if value is None:
+            if value == "":
                 continue
 
-            # Handle struct types (nested dicts)
-            if isinstance(value, dict):
-                kv[code] = value
-            elif isinstance(value, list):
-                kv[code] = value
-            elif isinstance(value, bool):
-                kv[code] = value
-            elif isinstance(value, (int, float)):
-                kv[code] = value
-            else:
+            # Convert value to native type according to dtype when possible
+            def _convert_value(val, dtype):
+                # If already native, return as-is
+                if isinstance(val, (dict, list, bool, int, float)):
+                    return val
+                s = str(val)
+                t = str(dtype).lower() if dtype is not None else ""
                 try:
-                    kv[code] = int(value)
-                except (ValueError, TypeError):
-                    kv[code] = value
+                    if t in ("int", "integer", "long", "number", "int32", "int64", "enum"):
+                        return int(float(s))
+                    if t in ("float", "double", "decimal"):
+                        return float(s)
+                    if t in ("bool", "boolean"):
+                        low = s.strip().lower()
+                        if low in ("true", "1", "on", "yes", "enabled"):
+                            return True
+                        if low in ("false", "0", "off", "no", "disabled"):
+                            return False
+                        # fallback: try numeric
+                        try:
+                            return bool(int(float(s)))
+                        except Exception:
+                            return s
+                    if t in ("json", "struct", "object", "map", "array"):
+                        try:
+                            return json.loads(s)
+                        except Exception:
+                            return val
+                    if t in ("text", "string"):
+                        return s
+                except Exception:
+                    return val
+
+                # Best-effort fallback: try int then float, else keep string
+                try:
+                    return int(s)
+                except Exception:
+                    try:
+                        return float(s)
+                    except Exception:
+                        return s
+
+            converted = _convert_value(value, dtype)
+            kv[code] = converted
+            log.debug("code: %s value: %r (dtype=%s) -> kv[%s] = %r", code, value, dtype, code, converted)
 
         return kv
     except Exception as e:
         log.debug("REST properties request failed: %s", e)
         return {}
+
+
+def set_device_property_rest(token: str, region: dict, pk: str, dk: str, properties: dict) -> bool:
+    """Set one or more device properties via REST API.
+
+    Args:
+        token: Bearer token from login().
+        region: Region dict from REGIONS.
+        pk: Product key.
+        dk: Device key.
+        properties: Dict of property_code -> value, e.g. {"ac_switch_hm": True}.
+
+    Returns:
+        True if the cloud accepted the command (code 200), False otherwise.
+    """
+    url = region["base_url"] + "/v2/binding/enduserapi/batchControlDevice"
+    data_list = [{code: value} for code, value in properties.items()]
+    body = {
+        "data": json.dumps(data_list),
+        "deviceList": [{"productKey": pk, "deviceKey": dk}],
+        "type": 2,
+    }
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=payload)
+    req.add_header("Authorization", token)
+    req.add_header("Content-Type", "application/json")
+    try:
+        log.debug("set_device_property_rest: POST %s body=%s", url, body)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        if result.get("code") != 200:
+            log.warning("set_device_property_rest failed: %s", result.get("msg", result))
+            return False
+        log.debug("set_device_property_rest OK: %s", result.get("data"))
+        return True
+    except Exception as e:
+        log.warning("set_device_property_rest request failed: %s", e)
+        return False
 
 
 def resolve_devices(config: dict, token: str, region: dict) -> list:

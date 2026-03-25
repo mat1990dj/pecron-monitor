@@ -50,14 +50,30 @@ python3 pecron_monitor.py --dc off
 # Offline mode (no internet, uses local WiFi/BLE only)
 python3 pecron_monitor.py --local
 
+# Online only mode (uses internet, MQTT/REST transports)
+python3 pecron_monitor.py --nolocal
+
+# REST only mode (uses internet, REST transport only)
+python3 pecron_monitor.py --rest-only
+
 # See all available controls for your model
 python3 pecron_monitor.py --controls
+
+# Set value for a specific control
+python3 pecron_monitor.py --control <name> <value>
 
 # Raw JSON dump (debugging)
 python3 pecron_monitor.py --raw
 
 # Diagnostics
-python3 pecron_monitor.py --diagnose -v
+python3 pecron_monitor.py --diagnose --verbose
+
+# Probe a control's supported values (tries 0,1,2,... until readback no longer matches)
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40
+# Start probing at a custom value
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-min 10 --probe-max 40
+# Probe over cloud only (skip local TCP/BLE setup)
+python3 pecron_monitor.py --probe-control ac_discharge_power_hm --probe-max 40 --nolocal
 ```
 
 ### Example Output
@@ -68,16 +84,21 @@ Device: AABBCCDDEEFF
 Connection: LOCAL TCP
 Data Quality: ✅ Full telemetry
 ==================================================
-Battery:       73%
-Voltage:       51.8V
-Temperature:   24°C
-Remaining:     8h 42m
-Total Input:   145W
-Total Output:  0W
-AC Output:     0W @ 120V
+Status:        Shut Down (0)
+Battery:       50%
+Voltage:       52.1V
+Temperature:   35°C
+Discharge time:2h 19m
+Charge time:   56h 6m
+Net Drain:     226.5W
+Total Input:   0W
+Total Output:  198W
+AC Output:     198W @ 122V
 DC Output:     0W
-AC Switch:     OFF
-DC Switch:     ON
+AC Input:      0W
+DC Input:      0W
+AC Switch:     ON
+DC Switch:     OFF
 UPS Mode:      OFF
 ```
 
@@ -223,18 +244,6 @@ setup_wizard.py     — Interactive setup
 
 Don't see yours? It probably still works — `--setup` checks all known product keys automatically.
 
-### Connection Behavior by Model
-
-Most models return full telemetry over local TCP (WiFi). However, some LFP models behave differently:
-
-| Model | Local TCP | Cloud MQTT | Notes |
-|-------|-----------|------------|-------|
-| E1500LFP, F3000LFP | ✅ Full telemetry | ✅ Full telemetry | Best experience — works fully offline |
-| E3600LFP, E3800LFP | ⚠️ Settings only | ✅ Telemetry | Local TCP returns switch states only; battery/voltage/power comes via cloud MQTT |
-| WB12200 | ✅ Full telemetry | ✅ Full telemetry | Battery management system |
-
-For E3600/E3800 users: the monitor automatically detects settings-only local TCP data and falls back to cloud MQTT for telemetry. You'll see `Local TCP data is settings-only (telemetry from cloud)` in verbose logs — this is expected behavior, not an error.
-
 ## Troubleshooting
 
 **"Login failed"** — Check email/password. Google/Apple sign-in users need to set a password in the Pecron app first.
@@ -244,8 +253,6 @@ For E3600/E3800 users: the monitor automatically detects settings-only local TCP
 **"Cannot run in offline mode"** — Run `--setup` first (needs internet once to fetch encryption key).
 
 **Local TCP not connecting** — Verify `lan_ip` is correct and port 6607 is open: `nc -zv 192.168.1.100 6607`
-
-**E3600/E3800 showing 0V / no power data** — These models only report telemetry via cloud MQTT. Make sure the device is connected to the internet (check the Pecron app) and don't use `--local` mode.
 
 **Wrong model name** — Cosmetic issue from Pecron's cloud catalog. Run `--diagnose -v` if data isn't working.
 
