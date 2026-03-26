@@ -456,8 +456,11 @@ class PecronMonitor:
         if kv.get("total_input_power", 0) > 0 or kv.get("total_output_power", 0) > 0:
             return True
         
-        # If we only have battery_percentage but nothing else, it's settings-only
-        # (E3800 returns this but it's not sufficient for complete telemetry)
+        # Check for battery_percentage at top level (E3600/E3800 MQTT telemetry packets)
+        battery_pct = kv.get("battery_percentage")
+        if battery_pct is not None and battery_pct >= 0:
+            return True
+        
         return False
 
     def _find_device(self, device_key: str) -> dict:
@@ -1093,11 +1096,13 @@ class PecronMonitor:
                             self._process_data(dk, kv, source="LOCAL TCP")
                             # Reset failure counter on successful read
                             self._local_connect_failures[dk] = 0
-                            continue
+                            # DON'T continue — still need to publish MQTT read request
+                            # E3600/E3800 local TCP only returns settings, need cloud for telemetry
                     except Exception as e:
                         log.warning("Local TCP read failed for %s: %s", dk, e)
 
-            # Try cloud MQTT (request data - actual response arrives via _on_message)
+            # Always publish MQTT read request (even if local TCP connected)
+            # E3600/E3800 local TCP only returns settings — we NEED cloud MQTT for telemetry
             if self.mqtt_client:
                 cid = self._channel_id(device)
                 pkt = build_ttlv_read(self._next_packet_id())
@@ -1216,15 +1221,21 @@ class PecronMonitor:
             if self.ha_bridge:
                 self.ha_bridge.disconnect()
 
-    def _enable_high_freq_reporting(self):
-        """Enable high-frequency MQTT reporting on all devices for fast cache warm-up."""
-        for d in self.devices:
+    def _enable_high_freq_reporting(self, stagger: float = 0):
+        """Enable high-frequency MQTT reporting on all devices for fast cache warm-up.
+        
+        Args:
+            stagger: Seconds to wait between devices (helps cloud process multi-device requests)
+        """
+        for i, d in enumerate(self.devices):
             dk = d["device_key"]
             try:
                 self.send_control(dk, "high_frequency_reporting", 3)
                 log.info("Enabled high-freq reporting for %s", dk)
             except Exception as e:
                 log.debug("Could not enable high-freq for %s: %s", dk, e)
+            if stagger > 0 and i < len(self.devices) - 1:
+                time.sleep(stagger)
 
     def _disable_high_freq_reporting(self):
         """Disable high-frequency reporting after warm-up period."""
@@ -1283,26 +1294,65 @@ class PecronMonitor:
             self.connect_mqtt()
             time.sleep(3)
             # Enable high-freq reporting for devices that need it (E3600/E3800)
+            # Stagger requests to avoid cloud throttling for multi-device setups
             if self.mqtt_client:
-                self._enable_high_freq_reporting()
-                time.sleep(2)  # Give device time to switch modes
+                for i, d in enumerate(self.devices):
+                    dk = d["device_key"]
+                    try:
+                        self.send_control(dk, "high_frequency_reporting", 3)
+                        log.info("Enabled high-freq reporting for %s", dk)
+                    except Exception as e:
+                        log.debug("Could not enable high-freq for %s: %s", dk, e)
+                    if i < len(self.devices) - 1:
+                        time.sleep(1)  # Stagger between devices
+                time.sleep(2)  # Give devices time to switch modes
         self._request_status()
-        # E3800LFP sends data in multiple MQTT packets with different shapes
-        # (voltage in one, battery_percentage in another, power in a third)
-        # Wait longer to collect all packet shapes for complete data
-        log.info("Collecting data (waiting up to 15s for multi-packet devices like E3800)...")
-        time.sleep(15)
-
-        # Check if any device still lacks telemetry — try a second round
-        incomplete_devices = []
-        for dk, kv in self.latest_data.items():
-            if not self._has_telemetry_fields(kv):
-                incomplete_devices.append(dk)
-        if incomplete_devices:
-            log.info("Devices still missing telemetry: %s — requesting again (waiting 15s more)...",
-                     ", ".join(incomplete_devices))
-            self._request_status()
-            time.sleep(15)
+        
+        # E3600/E3800 sends telemetry in alternating MQTT packets at ~10-15s intervals.
+        # Use an active polling loop: check every 5s, re-request for incomplete devices,
+        # give up after max_wait seconds total.
+        max_wait = 45  # Total max wait (was 30s rigid, now smarter)
+        check_interval = 5
+        elapsed = 0
+        all_device_keys = {d["device_key"] for d in self.devices}
+        last_request_time = 0
+        
+        log.info("Collecting data (up to %ds for multi-packet devices like E3600/E3800)...", max_wait)
+        
+        while elapsed < max_wait:
+            time.sleep(check_interval)
+            elapsed += check_interval
+            
+            # Check which devices still need telemetry
+            incomplete = []
+            for dk in all_device_keys:
+                kv = self.latest_data.get(dk, {})
+                if not self._has_telemetry_fields(kv):
+                    incomplete.append(dk)
+            
+            if not incomplete:
+                log.info("All devices have telemetry data (%ds)", elapsed)
+                break
+            
+            # Re-request data for incomplete devices every 10s
+            if elapsed - last_request_time >= 10:
+                log.info("Still waiting for telemetry from: %s (%ds/%ds)...",
+                         ", ".join(incomplete), elapsed, max_wait)
+                # Re-publish MQTT read requests for incomplete devices
+                if self.mqtt_client:
+                    for dk in incomplete:
+                        device = self._find_device(dk)
+                        if device:
+                            cid = self._channel_id(device)
+                            pkt = build_ttlv_read(self._next_packet_id())
+                            self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
+                last_request_time = elapsed
+        
+        if elapsed >= max_wait:
+            incomplete = [dk for dk in all_device_keys 
+                         if not self._has_telemetry_fields(self.latest_data.get(dk, {}))]
+            if incomplete:
+                log.warning("Timed out waiting for telemetry from: %s", ", ".join(incomplete))
 
         def _norm_model_key(value: str) -> str:
             return "".join(ch for ch in str(value).upper() if ch.isalnum())
