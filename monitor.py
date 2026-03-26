@@ -458,8 +458,12 @@ class PecronMonitor:
         
         # Check for battery_percentage at top level (E3600/E3800 MQTT telemetry packets)
         battery_pct = kv.get("battery_percentage")
-        if battery_pct is not None and battery_pct >= 0:
-            return True
+        if battery_pct is not None:
+            try:
+                if int(float(battery_pct)) >= 0:
+                    return True
+            except (ValueError, TypeError):
+                pass
         
         return False
 
