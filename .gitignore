@@ -1,4 +1,12 @@
 config.yaml
+pecron-hardware-devices.json
+tests/hardware/*.local.json
+.hermes/
 __pycache__/
 *.pyc
 .env
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+*.egg-info/
