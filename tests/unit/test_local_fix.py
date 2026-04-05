@@ -57,7 +57,12 @@ def test_setup_local_transports_with_lan_ip_and_auth(mock_local_transport, make_
 
     monitor._setup_local_transports()
 
-    mock_local_transport.assert_called_once_with("192.168.1.100", fake_auth_key)
+    mock_local_transport.assert_called_once_with(
+        "192.168.1.100",
+        fake_auth_key,
+        device_key="AABBCCDDEEFF",
+        controls={},
+    )
     assert "AABBCCDDEEFF" in monitor.local_transports
 
 
@@ -152,6 +157,11 @@ def test_cloud_auth_sets_up_local(mock_login, mock_resolve_devices, mock_local_t
     monitor = PecronMonitor(config)
     monitor.authenticate(force_offline=False)
 
-    mock_local_transport.assert_called_once_with("192.168.1.100", fake_auth_key)
+    mock_local_transport.assert_called_once_with(
+        "192.168.1.100",
+        fake_auth_key,
+        device_key="AABBCCDDEEFF",
+        controls={},
+    )
     assert "AABBCCDDEEFF" in monitor.local_transports
     assert monitor.offline_mode is False
