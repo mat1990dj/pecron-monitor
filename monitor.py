@@ -59,6 +59,7 @@ class PecronMonitor:
         self.no_ble = no_ble  # Skip BLE transport entirely
         self.rest_only = rest_only  # If True, disable MQTT and local transports; use REST API only
         self._local_data_keys = set()  # Track which device_keys got local data this polling cycle
+        self._last_logged_values = {}  # Track last logged values per device to avoid duplicate logs
 
         # Automation rules
         self.rules = config.get("rules", [])
@@ -626,6 +627,18 @@ class PecronMonitor:
                 self.ha_bridge.publish_state(device_key, kv)
             return  # Skip status log and automation rules for incomplete data
 
+        # Filter out misleading 0.0V voltage readings when battery_pct is valid
+        # E3600/E3800 MQTT sends alternating packets — one with battery%, another with voltage
+        # When battery% packet arrives first, voltage hasn't been received yet (shows 0.0V)
+        # Skip the status log in this case to avoid misleading "80% | 0.0V" logs
+        if voltage == 0 and battery_pct >= 0:
+            log.debug("Skipping status log for %s (voltage not yet received: battery=%d%%, voltage=%.1fV) — waiting for voltage packet",
+                      device_key, battery_pct, voltage)
+            # Still update HA bridge and check alerts with what we have
+            if self.ha_bridge:
+                self.ha_bridge.publish_state(device_key, kv)
+            return  # Skip status log until voltage arrives
+
         # Track data source — prefer local transports over cloud
         # If we already have a local source, don't let cloud overwrite it
         # (cloud MQTT fires asynchronously and can arrive after local TCP)
@@ -642,6 +655,25 @@ class PecronMonitor:
             remain_str = "N/A"
         else:
             remain_str = f"{remain // 60}h{remain % 60}m"
+
+        # Stale data detection: only log when values actually change
+        # When high-freq is disabled, data arrives every ~20 min but status is polled more frequently
+        # This prevents spamming logs with identical readings on every poll cycle
+        current_values = (battery_pct, voltage, temp, total_in, total_out)
+        last_values = self._last_logged_values.get(device_key)
+
+        if last_values == current_values:
+            log.debug("Skipping status log for %s (values unchanged: %d%%, %.1fV, %d°C, In:%dW, Out:%dW)",
+                      device_key, battery_pct, voltage, temp, total_in, total_out)
+            # Still update HA bridge and check alerts even with stale data
+            if self.ha_bridge:
+                self.ha_bridge.publish_state(device_key, kv)
+            self._check_alerts(device_key, battery_pct, voltage, remain)
+            self._evaluate_rules(device_key, kv, battery_pct)
+            return  # Skip status log for unchanged data
+
+        # Update last logged values
+        self._last_logged_values[device_key] = current_values
 
         log.info("🔋 %s%% | %.1fV | %d°C | ⚡ In:%dW Out:%dW | ⏱ %s [via %s]",
                  battery_pct, voltage, temp, total_in, total_out,
@@ -1180,28 +1212,31 @@ class PecronMonitor:
         poll_interval = self.config.get("poll_interval", 60)
         log.info("Monitoring started (polling every %ds)", poll_interval)
 
-        # Enable high-frequency MQTT reporting on all devices for fast initial data fill.
-        # The E3800 sends telemetry in 3 alternating MQTT packet shapes — with normal
-        # reporting (~60s interval), it takes ~3 min to see all shapes. High-freq gets
-        # a complete picture in ~30 seconds.
+        # Smart high-freq warm-up mode:
+        # Enable high-frequency MQTT reporting for a short warm-up period to quickly
+        # populate initial data (E3600/E3800 send telemetry in 3 alternating packet shapes).
+        # After warm-up, disable high-freq to avoid burning cloud quota (error code 4026).
         # Only useful when cloud MQTT is connected — skip in offline/local-only mode.
-        if self.mqtt_client:
+        high_freq_warmup_seconds = self.config.get("high_freq_warmup_seconds", 60)
+        if self.mqtt_client and high_freq_warmup_seconds > 0:
+            log.info("Enabling high-freq reporting for %ds warm-up period...", high_freq_warmup_seconds)
             self._enable_high_freq_reporting()
+            warmup_start = time.time()
 
         time.sleep(3)
         self._request_status()
-
-        last_high_freq_time = time.time()
 
         try:
             while self._running:
                 time.sleep(poll_interval)
 
-                # Re-send high-freq reporting request every 20s (matches app behavior)
-                # Only when cloud MQTT is active — pointless in offline/local-only mode
-                if self.mqtt_client and time.time() - last_high_freq_time >= 20:
-                    self._enable_high_freq_reporting()
-                    last_high_freq_time = time.time()
+                # Check if warm-up period has ended — disable high-freq to save cloud quota
+                if self.mqtt_client and high_freq_warmup_seconds > 0:
+                    elapsed = time.time() - warmup_start
+                    if elapsed >= high_freq_warmup_seconds:
+                        log.info("Warm-up complete (%.0fs) — disabling high-freq to preserve cloud quota", elapsed)
+                        self._disable_high_freq_reporting()
+                        high_freq_warmup_seconds = 0  # Prevent re-disabling on every loop
 
                 if self._token_needs_refresh():
                     log.info("Refreshing token...")
