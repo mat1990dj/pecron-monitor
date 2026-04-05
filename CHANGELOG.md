@@ -4,6 +4,18 @@ All notable changes to pecron-monitor are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-04-04
+
+### Added
+- **Smart high-frequency warm-up mode** — new `high_freq_warmup_seconds` config option (default: 60s). High-freq reporting is enabled briefly at startup to quickly populate initial telemetry, then disabled automatically to preserve cloud quota (prevents error 4026: “Insufficient resources in manufacturer's account”).
+- **E3600 / E3600LFP battery capacity mapping** — added both models to `BATTERY_CAPACITY_WH` (3600Wh).
+
+### Fixed
+- **Misleading “0.0V” status logs** — when the MQTT packet with battery% arrives before the voltage packet (common on E3600/E3800 alternating packet shapes), the monitor now skips the status log until voltage is available. HA state + alerts still update with partial data.
+
+### Changed
+- **Stale/duplicate status log spam** — continuous mode now tracks last logged values per device and only emits a status log when key values actually change (battery%, voltage, temp, in/out power). HA updates + alert/rule evaluation still run every poll.
+
 ## [0.6.5] — 2026-03-25
 
 ### Fixed
