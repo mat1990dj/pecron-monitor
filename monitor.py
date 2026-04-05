@@ -442,11 +442,11 @@ class PecronMonitor:
             if code == 4007:
                 if not hasattr(self, '_4007_warned'):
                     self._4007_warned = True
-                    log.error("Cloud says 'device is not bound' (code 4007).")
-                    log.error("This usually means the wrong product_key is configured.")
-                    log.error("Your device model may have multiple product keys in Pecron's system.")
-                    log.error("Fix: Run 'python pecron_monitor.py --setup' and use auto-detect (option 1).")
-                    log.error("If auto-detect finds multiple matches, try each one until MQTT data flows.")
+                    log.warning("Cloud reported 'device is not bound' (code 4007) during startup/control traffic.")
+                    log.warning("This can mean the wrong product_key is configured, but it can also be a transient or noisy cloud-system message.")
+                    log.warning("If device verification succeeds or telemetry still arrives via MQTT/local/REST, you can usually ignore this warning.")
+                    log.warning("Only treat it as actionable if the warning persists AND the device never produces telemetry.")
+                    log.warning("Then run 'python pecron_monitor.py --diagnose -v' or '--setup' to verify the product_key/device_key pair.")
             elif code and code != 200:
                 log.warning("Cloud system message: code=%s msg='%s' type=%s", code, msg_text, msg_type)
             else:

@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pecron-monitor"
+version = "0.5.6"
+description = "Monitor and control Pecron portable power stations from the command line."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+dependencies = [
+    "paho-mqtt>=2.0",
+    "pycryptodome>=3.19",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+ble = ["bleak>=0.21"]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+
+[tool.setuptools]
+py-modules = [
+    "cloud_api",
+    "constants",
+    "ha_bridge",
+    "helpers",
+    "lan_scan",
+    "local_transport",
+    "monitor",
+    "pecron_monitor",
+    "protocol",
+    "setup_wizard",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "network: tests that require network access to the Pecron cloud API",
+    "hardware: tests that require a real Pecron device on the LAN",
+    "slow: tests that take more than a second to run",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = [
+    "cloud_api",
+    "constants",
+    "ha_bridge",
+    "helpers",
+    "lan_scan",
+    "local_transport",
+    "monitor",
+    "pecron_monitor",
+    "protocol",
+    "setup_wizard",
+]
+omit = [
+    "tests/*",
+    "test_*.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

@@ -11,22 +11,26 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e ".[test]"
 
       - name: Syntax check
         run: python -m py_compile pecron_monitor.py && python -m py_compile local_transport.py
 
       - name: Import check
         run: python -c "import pecron_monitor; print(f'pecron-monitor {pecron_monitor.__version__}')"
+
+      - name: Run tests
+        run: pytest -v --cov=. --cov-report=term-missing
 
       - name: Version consistency
         run: |

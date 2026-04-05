@@ -28,7 +28,7 @@ Works with **any Pecron model** that uses the Pecron app (E300LFP through F5000L
 ```bash
 git clone https://github.com/attractify-logan/pecron-monitor.git
 cd pecron-monitor
-pip3 install -r requirements.txt
+pip3 install -e ".[test]"
 python3 pecron_monitor.py --setup
 ```
 
