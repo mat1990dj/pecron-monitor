@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Tests for ghost-pack / idle-port / SOC-fallback suppression.
+
+Covers the three behavior changes that stop ha_bridge.publish_state from
+populating cache keys that would render as '0' ghost entities in HA:
+
+1. Per-pack sensors (pack_N_*) skipped when the slot reports status=4
+   ('No Connection', i.e. no expansion pack in that bay).
+2. Per-port DC-input sensors (dc5521, gx16mf1, gx16mf2) skipped when the
+   port reports voltage=0 AND current=0 AND power=0 (nothing plugged in
+   to that port, or the device model doesn't have the port).
+3. soc_percent falls back to host_percent when the device only emits host-
+   shape packets (E1500LFP), so HA's Battery (SOC) entity reflects the
+   actual state instead of Unknown.
+"""
+
+import os
+import sys
+import unittest
+from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+sys.modules["paho"] = MagicMock()
+sys.modules["paho.mqtt"] = MagicMock()
+sys.modules["paho.mqtt.client"] = MagicMock()
+
+from ha_bridge import HomeAssistantBridge  # noqa: E402
+
+
+def make_bridge():
+    b = HomeAssistantBridge({"discovery_prefix": "homeassistant"}, devices=[])
+    b.client = MagicMock()
+    b._connected = True
+    b._published_topics = set()
+    return b
+
+
+# -------------------- Ghost pack suppression --------------------
+
+
+class TestPackSuppression(unittest.TestCase):
+
+    def _pack(self, status, battery=0, voltage=0.0, current=0.0, temp=0):
+        return {
+            "charging_pack_status": status,
+            "charging_pack_battery": battery,
+            "charging_pack_voltage": voltage,
+            "charging_pack_current": current,
+            "charging_pack_temp": temp,
+        }
+
+    def test_disconnected_pack_produces_null_cache_keys(self):
+        """Status 4 = No Connection. All pack_1_* keys present but None so HA
+        sees JSON null and transitions to Unknown (omitting the keys would
+        leave HA holding last-known value)."""
+        b = make_bridge()
+        kv = {
+            "host_packet_data_jdb": {
+                "host_packet_voltage": 53.1,
+                "host_packet_electric_percentage": 98,
+            },
+            "charging_pack_data_jdb": [
+                self._pack(status=3, battery=95, voltage=53.0, current=0.5, temp=30),  # connected
+                self._pack(status=4),  # No Connection
+                self._pack(status=4),
+                self._pack(status=4),
+            ],
+        }
+        b.publish_state("DEV1", kv)
+        cache = b._state_cache["DEV1"]
+        # Connected slot (0): all five keys present with real values
+        for k in ["pack_0_status", "pack_0_battery", "pack_0_voltage",
+                  "pack_0_current", "pack_0_temp"]:
+            self.assertIn(k, cache, f"connected pack must populate {k}")
+            self.assertIsNotNone(cache[k], f"connected pack {k} must have a value")
+        # Disconnected slots: keys present but None
+        for i in [1, 2, 3]:
+            for suffix in ["status", "battery", "voltage", "current", "temp"]:
+                key = f"pack_{i}_{suffix}"
+                self.assertIn(key, cache, f"disconnected pack_{i} must publish {key} (as null)")
+                self.assertIsNone(cache[key], f"disconnected pack_{i} {key} must be None, got {cache[key]!r}")
+
+    def test_previously_cached_pack_nulled_when_disconnected(self):
+        """If a pack WAS connected and is now status=4, overwrite stale values
+        with None so HA's state JSON carries explicit nulls."""
+        b = make_bridge()
+        # Seed cache with a previously connected pack 1
+        b._state_cache["DEV1"] = {
+            "pack_1_battery": 80, "pack_1_voltage": 52.0,
+            "pack_1_current": 0.3, "pack_1_temp": 28, "pack_1_status": "Charging",
+        }
+        kv = {
+            "host_packet_data_jdb": {"host_packet_voltage": 53.1,
+                                      "host_packet_electric_percentage": 98},
+            "charging_pack_data_jdb": [self._pack(status=4)] * 4,
+        }
+        b.publish_state("DEV1", kv)
+        cache = b._state_cache["DEV1"]
+        for suffix in ["status", "battery", "voltage", "current", "temp"]:
+            key = f"pack_1_{suffix}"
+            self.assertIsNone(cache[key],
+                              f"stale pack_1_{suffix} must be set to None after disconnect, got {cache[key]!r}")
+
+
+# -------------------- Idle port suppression --------------------
+
+
+class TestPortSuppression(unittest.TestCase):
+
+    def _kv(self, **port_values):
+        """Build a kv that places per-port values under dc_data_input_hm,
+        matching SENSOR_FIELDS paths."""
+        return {
+            "host_packet_data_jdb": {"host_packet_voltage": 53.1,
+                                      "host_packet_electric_percentage": 98},
+            "dc_data_input_hm": port_values,
+        }
+
+    def test_port_discovery_deferred_until_first_observation(self):
+        """Models without per-port breakdown (E1500LFP) never report any
+        per-port field, so their discovery topics are never published and
+        HA doesn't accumulate ghost Unknown entities."""
+        b = make_bridge()
+        b._device_dev_info["DEV1"] = {"identifiers": ["pecron_DEV1"]}
+        kv_no_ports = {
+            "host_packet_data_jdb": {
+                "host_packet_voltage": 53.1,
+                "host_packet_electric_percentage": 97,
+            },
+            # No dc_data_input_hm: device doesn't emit per-port data.
+        }
+        b.publish_state("DEV1", kv_no_ports)
+        self.assertEqual(b._deferred_ports_published, set(),
+                         "no discovery should fire when the device reports no port data")
+        # Confirm no per-port config topic was published either.
+        published_ports = [call for call in b.client.publish.call_args_list
+                           if "dc5521" in call.args[0] or "gx16mf" in call.args[0]]
+        self.assertEqual(published_ports, [],
+                         "no discovery config topics for per-port entities expected")
+
+    def test_port_discovery_fires_on_first_observation(self):
+        """A solar-capable device reporting gx16mf2 data publishes discovery
+        for those 3 entities on the first packet. Idempotent on subsequent
+        packets."""
+        b = make_bridge()
+        b._device_dev_info["DEV1"] = {"identifiers": ["pecron_DEV1"]}
+        kv = self._kv(
+            gx16mf2_input_voltage=44.0, gx16mf2_input_current=0.9, gx16mf2_input_power=39,
+        )
+        b.publish_state("DEV1", kv)
+        self.assertIn(("DEV1", "gx16mf2"), b._deferred_ports_published)
+
+        # 3 discovery topics published for gx16mf2.
+        gx_topics = [c.args[0] for c in b.client.publish.call_args_list
+                     if "gx16mf2" in c.args[0] and c.args[0].endswith("/config")]
+        self.assertEqual(len(gx_topics), 3)
+
+        # Second packet with the same port data: no additional discovery
+        # publishes.
+        pre = len(gx_topics)
+        b.publish_state("DEV1", kv)
+        gx_topics_after = [c.args[0] for c in b.client.publish.call_args_list
+                           if "gx16mf2" in c.args[0] and c.args[0].endswith("/config")]
+        self.assertEqual(len(gx_topics_after), pre,
+                         "discovery must be idempotent; no re-publish on second observation")
+
+    def test_idle_port_shows_honest_zeros(self):
+        """For idle ports, 0V / 0A / 0W is the real reading (empty-port
+        measurement). Publish the zeros; don't suppress them. Unknown on an
+        empty port is worse UX than 0 because the device genuinely measures 0
+        there, unlike the pack case where disconnected slots bleed misleading
+        nonzero data."""
+        b = make_bridge()
+        kv = self._kv(
+            dc5521_input_voltage=0, dc5521_input_current=0, dc5521_input_power=0,
+            gx16mf1_input_voltage=0, gx16mf1_input_current=0, gx16mf1_input_power=0,
+            gx16mf2_input_voltage=18.2, gx16mf2_input_current=2.1, gx16mf2_input_power=38,
+        )
+        b.publish_state("DEV1", kv)
+        cache = b._state_cache["DEV1"]
+        # Idle ports: present with zero values (NOT None, NOT absent)
+        for port in ["dc5521", "gx16mf1"]:
+            for suffix in ["voltage", "current", "power"]:
+                key = f"{port}_input_{suffix}"
+                self.assertIn(key, cache)
+                self.assertEqual(cache[key], 0,
+                                 f"idle port {port} {key} must publish 0, got {cache[key]!r}")
+        # Active port: real values
+        self.assertEqual(cache["gx16mf2_input_voltage"], 18.2)
+        self.assertEqual(cache["gx16mf2_input_current"], 2.1)
+        self.assertEqual(cache["gx16mf2_input_power"], 38)
+
+
+# -------------------- SOC fallback --------------------
+
+
+class TestSocFallback(unittest.TestCase):
+
+    def test_soc_falls_back_to_host_percent(self):
+        """When only host-shape packets arrive, soc_percent mirrors host_percent."""
+        b = make_bridge()
+        kv = {
+            "host_packet_data_jdb": {
+                "host_packet_voltage": 53.1,
+                "host_packet_electric_percentage": 98,
+            },
+            # No battery_percentage at top level -> soc_percent would stay None.
+        }
+        b.publish_state("DEV1", kv)
+        cache = b._state_cache["DEV1"]
+        self.assertEqual(cache.get("host_percent"), 98)
+        self.assertEqual(cache.get("soc_percent"), 98,
+                         "soc_percent must mirror host_percent when not independently set")
+
+    def test_explicit_soc_not_overwritten_by_host(self):
+        """When the overall-shape packet provides soc_percent, don't clobber it with host."""
+        b = make_bridge()
+        # First packet: overall shape sets soc_percent (device with expansion
+        # pack reports distinct overall SOC).
+        kv_overall = {"battery_percentage": 85}  # no host_packet_data_jdb
+        b.publish_state("DEV1", kv_overall)
+        self.assertEqual(b._state_cache["DEV1"].get("soc_percent"), 85)
+
+        # Second packet: host shape with different host_percent. soc_percent
+        # is already populated, so fallback must not rewrite it to host_percent.
+        kv_host = {
+            "host_packet_data_jdb": {
+                "host_packet_voltage": 53.1,
+                "host_packet_electric_percentage": 90,
+            }
+        }
+        b.publish_state("DEV1", kv_host)
+        cache = b._state_cache["DEV1"]
+        self.assertEqual(cache.get("host_percent"), 90)
+        self.assertEqual(cache.get("soc_percent"), 85,
+                         "explicit soc_percent must not be clobbered by host fallback")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
