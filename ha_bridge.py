@@ -85,6 +85,32 @@ ENTITY_CATEGORIES = {
 _DIAGNOSTIC_PREFIXES = ("pack_",)
 
 
+# Issue #78: sensor device_classes whose readings are instantaneous point-in-time
+# measurements. HA only records long-term statistics for numeric sensors that
+# declare a state_class, so without this these sensors are display-only — they
+# never appear in history statistics and can't feed the Energy Dashboard via a
+# Riemann-sum integral helper (power W -> energy kWh). The `energy` device_class
+# is intentionally excluded: cumulative counters set state_class=total_increasing
+# at their call site instead.
+_MEASUREMENT_DEVICE_CLASSES = frozenset({"power", "voltage", "current", "temperature", "battery"})
+
+# Issue #78 review: sensor keys that carry a numeric device_class but whose state
+# publish_state decodes to a STRING label, not a number. These are the WB12200
+# charge/discharge limits -> "12.8V" / "60A" via WB_*_LABELS. A numeric
+# state_class on a string state is invalid in HA, so they're excluded from the
+# injection below. Genuine numeric config sensors (e.g. ac_output_voltage) are
+# NOT in this set and still get state_class. Keep in sync with the label decoder
+# (_wb_enum_fields) in publish_state.
+_LABEL_SENSOR_KEYS = frozenset(
+    {
+        "charging_limit_voltage",
+        "discharge_limit_voltage",
+        "charging_current_limit",
+        "discharge_current_limit",
+    }
+)
+
+
 def entity_category_for(key: str):
     """Return the HA entity_category ('config' / 'diagnostic') for an entity key,
     or None if the entity should stay in the main device view."""
@@ -1158,6 +1184,20 @@ class HomeAssistantBridge:
             category = "diagnostic"
         if category and "entity_category" not in config:
             config = {**config, "entity_category": category}
+        # Issue #78: tag instantaneous measurement sensors with
+        # state_class=measurement so HA records long-term statistics for them.
+        # Applied centrally so every numeric sensor benefits without per-call-site
+        # edits. Call sites that set state_class explicitly (e.g. total_energy =>
+        # total_increasing) are left untouched. _LABEL_SENSOR_KEYS are excluded:
+        # they carry a numeric device_class but publish string labels, invalid
+        # under a numeric state_class.
+        if (
+            component == "sensor"
+            and key not in _LABEL_SENSOR_KEYS
+            and "state_class" not in config
+            and config.get("device_class") in _MEASUREMENT_DEVICE_CLASSES
+        ):
+            config = {**config, "state_class": "measurement"}
         topic = f"{self.discovery_prefix}/{component}/pecron_{dk}/{key}/config"
         if self._clear_current_discovery:
             self.client.publish(topic, "", qos=1, retain=True)
