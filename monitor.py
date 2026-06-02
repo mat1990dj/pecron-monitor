@@ -1312,6 +1312,84 @@ class PecronMonitor:
         if result.returncode != 0:
             raise RuntimeError(f"command exited with status {result.returncode}: {argv[0]}")
 
+    # Trigger condition keys, ANDed together when more than one is present on a
+    # rule (#56). `state`/`states` are separate preconditions handled by
+    # _rule_state_matches and are intentionally not in this list.
+    _TRIGGER_CONDITION_KEYS = (
+        "init",
+        "battery_below",
+        "battery_above",
+        "voltage_below",
+        "voltage_above",
+        "input_power_below",
+        "input_power_above",
+        "output_power_below",
+        "output_power_above",
+        "schedule",
+        "schedule_between",
+    )
+
+    @staticmethod
+    def _in_time_window(now_hm: str, start_hm: str, end_hm: str) -> bool:
+        """True if now is within [start, end), supporting windows that wrap past
+        midnight (e.g. 22:00-06:00). A zero-width window never matches."""
+
+        def _mins(hm: str) -> int:
+            hh, mm = str(hm).split(":")
+            return int(hh) * 60 + int(mm)
+
+        try:
+            now, start, end = _mins(now_hm), _mins(start_hm), _mins(end_hm)
+        except (ValueError, AttributeError):
+            log.warning("Invalid HH:MM in schedule_between: %r-%r", start_hm, end_hm)
+            return False
+        if start == end:
+            return False
+        if start < end:
+            return start <= now < end
+        return now >= start or now < end
+
+    def _eval_condition_clause(
+        self, key: str, condition: dict, kv: dict, battery_pct: int, init: bool
+    ) -> bool:
+        """Evaluate one trigger clause. Returns True only if satisfied; missing or
+        unevaluable telemetry returns False so the (ANDed) rule does not fire."""
+        if key == "init":
+            # `init` is a startup trigger only when true. `init: false` must not
+            # become an "always fires on normal eval" trigger (#56 review).
+            return bool(condition.get("init")) and init
+        if key == "battery_below":
+            return battery_pct >= 0 and battery_pct <= condition["battery_below"]
+        if key == "battery_above":
+            return battery_pct >= 0 and battery_pct >= condition["battery_above"]
+        if key == "voltage_below":
+            v = self._extract_voltage(kv)
+            return v is not None and v <= float(condition["voltage_below"])
+        if key == "voltage_above":
+            v = self._extract_voltage(kv)
+            return v is not None and v >= float(condition["voltage_above"])
+        if key == "input_power_below":
+            p = self._extract_power(kv, "total_input_power", "ac_input_power", "dc_input_power")
+            return p is not None and p <= condition["input_power_below"]
+        if key == "input_power_above":
+            p = self._extract_power(kv, "total_input_power", "ac_input_power", "dc_input_power")
+            return p is not None and p >= condition["input_power_above"]
+        if key == "output_power_below":
+            p = self._extract_power(kv, "total_output_power", "ac_output_power", "dc_output_power")
+            return p is not None and p <= condition["output_power_below"]
+        if key == "output_power_above":
+            p = self._extract_power(kv, "total_output_power", "ac_output_power", "dc_output_power")
+            return p is not None and p >= condition["output_power_above"]
+        if key == "schedule":
+            return datetime.now().strftime("%H:%M") == condition["schedule"]
+        if key == "schedule_between":
+            window = condition["schedule_between"]
+            if not isinstance(window, (list, tuple)) or len(window) != 2:
+                log.warning("schedule_between must be [start, end] HH:MM, got %r", window)
+                return False
+            return self._in_time_window(datetime.now().strftime("%H:%M"), window[0], window[1])
+        return False
+
     def _evaluate_rules(self, device_key: str, kv: dict, battery_pct: int, *, init: bool = False):
         """Evaluate automation rules against current state."""
         # Sanity check: prevent rule triggers on invalid non-init data.
@@ -1336,45 +1414,19 @@ class PecronMonitor:
                 if not self._rule_state_matches(condition):
                     continue
 
-                # Check condition. `state`/`states` are preconditions, not
-                # triggers by themselves; they must be paired with another
-                # condition such as init, voltage_below, or schedule.
-                triggered = False
-                if condition.get("init"):
-                    triggered = init
-                elif "battery_below" in condition:
-                    # Ignore invalid battery readings (-1 means no data)
-                    if battery_pct < 0:
-                        continue
-                    triggered = battery_pct <= condition["battery_below"]
-                elif "battery_above" in condition:
-                    if battery_pct < 0:
-                        continue
-                    triggered = battery_pct >= condition["battery_above"]
-                elif "voltage_below" in condition:
-                    voltage_now = self._extract_voltage(kv)
-                    if voltage_now is None:
-                        continue
-                    triggered = voltage_now <= float(condition["voltage_below"])
-                elif "voltage_above" in condition:
-                    voltage_now = self._extract_voltage(kv)
-                    if voltage_now is None:
-                        continue
-                    triggered = voltage_now >= float(condition["voltage_above"])
-                elif "input_power_below" in condition:
-                    triggered = (
-                        int(kv.get("total_input_power", 0)) <= condition["input_power_below"]
-                    )
-                elif "input_power_above" in condition:
-                    triggered = (
-                        int(kv.get("total_input_power", 0)) >= condition["input_power_above"]
-                    )
-                elif "schedule" in condition:
-                    # Time-based: "HH:MM" format
-                    now = datetime.now().strftime("%H:%M")
-                    triggered = now == condition["schedule"]
-
-                if not triggered:
+                # Check condition. `state`/`states` are preconditions handled
+                # above, not triggers by themselves. Every trigger key present is
+                # ANDed (#56): e.g. voltage_below + output_power_below fires only
+                # when both hold. A rule with no trigger key (state gate only)
+                # never fires. A clause that can't be evaluated (missing
+                # telemetry) returns False, so the rule does not fire.
+                present = [k for k in self._TRIGGER_CONDITION_KEYS if k in condition]
+                if not present:
+                    continue
+                if not all(
+                    self._eval_condition_clause(k, condition, kv, battery_pct, init)
+                    for k in present
+                ):
                     continue
 
                 # Check cooldown
@@ -1667,6 +1719,36 @@ class PecronMonitor:
             if voltage > 0:
                 return voltage
         return None
+
+    def _extract_power(self, kv: dict, total_key: str, ac_key: str, dc_key: str):
+        """Resolve a power channel (W) for rule conditions.
+
+        Returns the top-level total when present and non-zero, else the AC+DC
+        component sum when BOTH components are present (mirrors the fallback in
+        _process_data so rules see the same value as status logging), else a
+        genuinely-reported 0, else None when the value is unknown. Returning None
+        lets `_below`/`_above` conditions decline to fire on missing telemetry
+        instead of treating absent load as 0 W (unsafe for charge automation)."""
+
+        def _as_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        total = _as_int(_get_kv(kv, SENSOR_FIELDS[total_key]))
+        ac = _get_kv(kv, SENSOR_FIELDS[ac_key])
+        dc = _get_kv(kv, SENSOR_FIELDS[dc_key])
+        components = None
+        if ac is not None and dc is not None:
+            a, d = _as_int(ac), _as_int(dc)
+            if a is not None and d is not None:
+                components = a + d
+        if total is not None and total != 0:
+            return total
+        if components is not None:
+            return components
+        return total  # genuine 0, or None when unknown
 
     def _restore_cfg(self) -> dict:
         return self.config.get("restore_outputs_after_shutdown", {}) or {}
