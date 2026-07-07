@@ -2335,11 +2335,16 @@ class PecronMonitor:
                 is_on = str(payload).upper() in ("ON", "TRUE", "1")
             self.send_bool_control(device_key, code, is_on)
         elif control == "ac_charging_power":
-            val_str = str(payload).replace("%", "").strip()
+            val_str = str(payload).strip()
+            is_percent = "%" in val_str
+            val_str = val_str.replace("%", "")
             try:
-                pct = int(val_str)
-                # Map option (e.g. 50 or 50%) or direct index back to enum key
-                index = pct // 10 if pct > 10 else pct
+                val = int(val_str)
+                if is_percent:
+                    index = val // 10
+                else:
+                    index = val // 10 if val > 10 else val
+                
                 if 0 <= index <= 10:
                     self.send_control(device_key, "ac_charging_power_ios", index)
             except (ValueError, TypeError):
