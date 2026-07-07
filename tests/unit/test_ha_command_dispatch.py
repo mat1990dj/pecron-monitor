@@ -132,10 +132,23 @@ class TestHaCommandDispatch(unittest.TestCase):
         )
         m.send_bool_control.assert_called_once_with("dk0", "ac_switch_hm", True)
 
-    def test_ac_charging_power_dispatch(self):
+    def test_ac_charging_power_dispatch_ten_percent(self):
+        """Verify that a 10% payload correctly maps to protocol index 1 (not 10)."""
+        m = make_monitor()
+        m._ha_command("dk0", "ac_charging_power", "10%")
+        m.send_control.assert_called_once_with("dk0", "ac_charging_power_ios", 1)
+
+    def test_ac_charging_power_dispatch_fifty_percent(self):
+        """Verify that normal mid-range percentage select values parse accurately."""
         m = make_monitor()
         m._ha_command("dk0", "ac_charging_power", "50%")
         m.send_control.assert_called_once_with("dk0", "ac_charging_power_ios", 5)
+
+    def test_ac_charging_power_dispatch_raw_index_fallback(self):
+        """Verify that direct integer index payloads continue to pass through unharmed."""
+        m = make_monitor()
+        m._ha_command("dk0", "ac_charging_power", "1")
+        m.send_control.assert_called_once_with("dk0", "ac_charging_power_ios", 1)
 
     def test_ups_charge_threshold_dispatch(self):
         m = make_monitor()
