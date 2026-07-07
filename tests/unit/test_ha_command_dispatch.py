@@ -142,6 +142,19 @@ class TestHaCommandDispatch(unittest.TestCase):
         m._ha_command("dk0", "ups_charge_threshold", "80%")
         m.send_control.assert_called_once_with("dk0", "ups_start_charge_value_as", 80)
 
+    def test_numeric_selects_bypass_local_transports(self):
+        """Verify that numeric ENUM/INT fields completely bypass local transport layers."""
+        m = make_monitor()
+        m.local_transports["dk0"] = MagicMock()
+        
+        # Fire non-boolean selection change
+        m._ha_command("dk0", "ac_charging_power", "40%")
+        
+        # Local transport should never have been touched or called
+        m.local_transports["dk0"].send_control.assert_not_called()
+        # Cloud publish route verified
+        m.send_control.assert_called_once_with("dk0", "ac_charging_power_ios", 4)
+
 
 class TestHaCommandMapMatchesDiscovery(unittest.TestCase):
     """Regression guard: the dispatch map must cover every command_topic that
