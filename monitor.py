@@ -2303,29 +2303,41 @@ class PecronMonitor:
             except Exception as e:
                 log.debug("Could not disable high-freq for %s: %s", dk, e)
 
-    def _ha_command(self, device_key: str, control: str, on: bool):
-        """Handle commands from Home Assistant.
-
-        The slug→TSL map below must mirror every switch published by
-        ha_bridge._publish_discovery with a command_topic. If discovery adds
-        a new switch, add the slug→TSL row here too. Issue #54: previously
-        only ac/dc/ups were mapped, so HA toggles for eco_mode, touch_lock,
-        and auto_dim (auto_light_flag_as) were silently dropped. The longer
-        term cleanup is to drive this map from discovery; not in this PR.
-        """
+    def _ha_command(self, device_key: str, control: str, payload: Any):
+        """Handle commands from Home Assistant."""
         ctrl_map = {
             "ac": "ac_switch_hm",
             "dc": "dc_switch_hm",
             "ups": "ups_status_hm",
             "eco_mode": "eco_quite_mode_as",
             "touch_lock": "device_touch_locking_as",
-            # auto_dim's command_topic uses the TSL field name directly
-            # (see ha_bridge.py:628), so the slug == the TSL code here.
             "auto_light_flag_as": "auto_light_flag_as",
         }
         code = ctrl_map.get(control)
         if code:
-            self.send_bool_control(device_key, code, on)
+            if isinstance(payload, bool):
+                is_on = payload
+            else:
+                is_on = str(payload).upper() in ("ON", "TRUE", "1")
+            self.send_bool_control(device_key, code, is_on)
+        elif control == "ac_charging_power":
+            val_str = str(payload).replace("%", "").strip()
+            try:
+                pct = int(val_str)
+                # Map option (e.g. 50 or 50%) or direct index back to enum key
+                index = pct // 10 if pct > 10 else pct
+                if 0 <= index <= 10:
+                    self.send_control(device_key, "ac_charging_power_ios", index)
+            except (ValueError, TypeError):
+                log.warning("Invalid AC charging power payload from HA: %r", payload)
+        elif control == "ups_charge_threshold":
+            val_str = str(payload).replace("%", "").strip()
+            try:
+                pct = int(val_str)
+                if 30 <= pct <= 100:
+                    self.send_control(device_key, "ups_start_charge_value_as", pct)
+            except (ValueError, TypeError):
+                log.warning("Invalid UPS charge threshold payload from HA: %r", payload)
         else:
             log.warning(
                 "HA command for unknown control %r on %s -- no slug->TSL mapping (issue #54)",
