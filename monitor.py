@@ -1016,7 +1016,8 @@ class PecronMonitor:
         else:
             log.warning("Unknown control type '%s' for %s, trying bool", ctrl_type, control_code)
             pkt = build_ttlv_write_bool(pid, ctrl["id"], bool(value))
-        
+
+        # Only attempt local radio writes for boolean switches (hardware limitation)
         if ctrl_type == "BOOL":
             # Try BLE first
             ble = self.ble_transports.get(device_key)
@@ -1033,7 +1034,7 @@ class PecronMonitor:
                         return True
                 except Exception as e:
                     log.warning("BLE control failed: %s", e)
-    
+
             # Try TCP/WiFi local transport (reconnect if needed - Pecron closes TCP after each exchange)
             lt = self.local_transports.get(device_key)
             if lt:
@@ -1053,11 +1054,23 @@ class PecronMonitor:
                                 device_key,
                             )
                             return True
-                    except Exception as e:
-                        log.warning("TCP control failed: %s", e)
+                except Exception as e:
+                    log.warning("TCP control failed: %s", e)
 
-        # Fall back to cloud transports (MQTT primary, REST fallback)
-        # Normal mode: try MQTT first, REST as fallback
+        # Fall back to cloud transports
+        # Fix: Route non-boolean configurations (ENUM/INT) straight to REST API (issue #84)
+        if ctrl_type != "BOOL" and self.token_data:
+            if set_device_property_rest(
+                self.token_data["token"],
+                self.region,
+                device["product_key"],
+                device_key,
+                {control_code: value},
+            ):
+                log.info("Sent %s=%s to %s via CLOUD REST API", control_code, value, device_key)
+                return True
+
+        # Boolean primary cloud transport / last-resort fallback channel
         if self.mqtt_client is not None:
             self.mqtt_client.publish(f"q/1/d/{cid}/bus", pkt, qos=1)
             log.info(
@@ -1069,7 +1082,7 @@ class PecronMonitor:
             )
             return True
 
-        # MQTT not available, try REST API as fallback
+        # Last-resort cloud backup for Boolean toggles if MQTT client instance drops
         if self.token_data:
             if set_device_property_rest(
                 self.token_data["token"],
