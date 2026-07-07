@@ -1016,36 +1016,15 @@ class PecronMonitor:
         else:
             log.warning("Unknown control type '%s' for %s, trying bool", ctrl_type, control_code)
             pkt = build_ttlv_write_bool(pid, ctrl["id"], bool(value))
-
-        # Try BLE first
-        ble = self.ble_transports.get(device_key)
-        if ble and ble.connected:
-            try:
-                if ble.send_control(ctrl["id"], value, ctrl_type, verify=verify):
-                    log.info(
-                        "Sent %s=%s (type=%s) to %s via BLE",
-                        control_code,
-                        value,
-                        ctrl_type,
-                        device_key,
-                    )
-                    return True
-            except Exception as e:
-                log.warning("BLE control failed: %s", e)
-
-        # Try TCP/WiFi local transport (reconnect if needed - Pecron closes TCP after each exchange)
-        lt = self.local_transports.get(device_key)
-        if lt:
-            if not lt.connected:
+        
+        if ctrl_type == "BOOL":
+            # Try BLE first
+            ble = self.ble_transports.get(device_key)
+            if ble and ble.connected:
                 try:
-                    self._connect_local(device_key)
-                except Exception as e:
-                    log.debug("Local TCP reconnect failed for %s: %s", device_key, e)
-            if lt.connected:
-                try:
-                    if lt.send_control(ctrl["id"], value, ctrl_type, verify=verify):
+                    if ble.send_control(ctrl["id"], value, ctrl_type, verify=verify):
                         log.info(
-                            "Sent %s=%s (type=%s) to %s via TCP",
+                            "Sent %s=%s (type=%s) to %s via BLE",
                             control_code,
                             value,
                             ctrl_type,
@@ -1053,7 +1032,29 @@ class PecronMonitor:
                         )
                         return True
                 except Exception as e:
-                    log.warning("TCP control failed: %s", e)
+                    log.warning("BLE control failed: %s", e)
+    
+            # Try TCP/WiFi local transport (reconnect if needed - Pecron closes TCP after each exchange)
+            lt = self.local_transports.get(device_key)
+            if lt:
+                if not lt.connected:
+                    try:
+                        self._connect_local(device_key)
+                    except Exception as e:
+                        log.debug("Local TCP reconnect failed for %s: %s", device_key, e)
+                if lt.connected:
+                    try:
+                        if lt.send_control(ctrl["id"], value, ctrl_type, verify=verify):
+                            log.info(
+                                "Sent %s=%s (type=%s) to %s via TCP",
+                                control_code,
+                                value,
+                                ctrl_type,
+                                device_key,
+                            )
+                            return True
+                    except Exception as e:
+                        log.warning("TCP control failed: %s", e)
 
         # Fall back to cloud transports (MQTT primary, REST fallback)
         # Normal mode: try MQTT first, REST as fallback
