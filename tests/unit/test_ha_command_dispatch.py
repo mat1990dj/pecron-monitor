@@ -57,6 +57,7 @@ def make_monitor():
         }
     ]
     m.send_bool_control = MagicMock()
+    m.send_control = MagicMock()
     return m
 
 
@@ -131,6 +132,16 @@ class TestHaCommandDispatch(unittest.TestCase):
         )
         m.send_bool_control.assert_called_once_with("dk0", "ac_switch_hm", True)
 
+    def test_ac_charging_power_dispatch(self):
+        m = make_monitor()
+        m._ha_command("dk0", "ac_charging_power", "50%")
+        m.send_control.assert_called_once_with("dk0", "ac_charging_power_ios", 5)
+
+    def test_ups_charge_threshold_dispatch(self):
+        m = make_monitor()
+        m._ha_command("dk0", "ups_charge_threshold", "80%")
+        m.send_control.assert_called_once_with("dk0", "ups_start_charge_value_as", 80)
+
 
 class TestHaCommandMapMatchesDiscovery(unittest.TestCase):
     """Regression guard: the dispatch map must cover every command_topic that
@@ -174,8 +185,12 @@ class TestHaCommandMapMatchesDiscovery(unittest.TestCase):
         for slug in sorted(discovered_slugs):
             with self.subTest(slug=slug):
                 m = make_monitor()
-                m._ha_command("dk0", slug, True)
-                (m.send_bool_control.assert_called_once(),)  # not silently dropped
+                if slug in ("ac_charging_power", "ups_charge_threshold"):
+                    m._ha_command("dk0", slug, "50%")
+                    m.send_control.assert_called_once()
+                else:
+                    m._ha_command("dk0", slug, True)
+                    m.send_bool_control.assert_called_once()
 
 
 if __name__ == "__main__":
