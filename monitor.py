@@ -1054,7 +1054,7 @@ class PecronMonitor:
                                 device_key,
                             )
                             return True
-                except Exception as e:
+                    except Exception as e:
                     log.warning("TCP control failed: %s", e)
 
         # Fall back to cloud transports
@@ -2167,7 +2167,7 @@ class PecronMonitor:
 
         try:
             while self._running:
-                
+                time.sleep(poll_interval)
                 # Check if warm-up period has ended — disable high-freq to save cloud quota
                 if self.mqtt_client and high_freq_warmup_seconds > 0:
                     elapsed = time.time() - warmup_start
