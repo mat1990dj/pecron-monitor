@@ -2293,7 +2293,7 @@ class PecronMonitor:
                     index = val // 10
                 else:
                     index = val // 10 if val > 10 else val
-                
+
                 if 0 <= index <= 10:
                     self.send_control(device_key, "ac_charging_power_ios", index)
             except (ValueError, TypeError):

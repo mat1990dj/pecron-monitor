@@ -159,10 +159,10 @@ class TestHaCommandDispatch(unittest.TestCase):
         """Verify that numeric ENUM/INT fields completely bypass local transport layers."""
         m = make_monitor()
         m.local_transports["dk0"] = MagicMock()
-        
+
         # Fire non-boolean selection change
         m._ha_command("dk0", "ac_charging_power", "40%")
-        
+
         # Local transport should never have been touched or called
         m.local_transports["dk0"].send_control.assert_not_called()
         # Cloud publish route verified
