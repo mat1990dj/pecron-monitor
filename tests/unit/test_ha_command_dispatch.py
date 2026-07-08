@@ -189,8 +189,8 @@ class TestHaCommandMapMatchesDiscovery(unittest.TestCase):
                 "device_touch_locking_as": {},
                 "battery_temp": {},
                 "charging_plate_temp": {},
-                "ac_charging_power": {},
-                "ups_charge_threshold": {},
+                "ac_charging_power_ios": {},
+                "ups_start_charge_value_as": {},
             },
         }
         b = HomeAssistantBridge({"discovery_prefix": "homeassistant"}, devices=[device])
