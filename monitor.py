@@ -2166,18 +2166,8 @@ class PecronMonitor:
         self._request_status()
 
         try:
-            # Replaced fixed sleep with a dynamic interval to completely eliminate loop cadence drift
-            next_cycle = time.time() + poll_interval
             while self._running:
-                sleep_needed = next_cycle - time.time()
-                if sleep_needed > 0:
-                    time.sleep(sleep_needed)
-                else:
-                    # Reset target time if active collection overran the window, preventing stacked cycles
-                    next_cycle = time.time()
                 
-                next_cycle += poll_interval
-
                 # Check if warm-up period has ended — disable high-freq to save cloud quota
                 if self.mqtt_client and high_freq_warmup_seconds > 0:
                     elapsed = time.time() - warmup_start
@@ -2211,49 +2201,8 @@ class PecronMonitor:
                 if self.ha_bridge:
                     self.ha_bridge.try_reconnect()
 
-                # Perform the primary per-cycle status update
                 self._request_status()
 
-                # Active retry loop scoped exclusively to local, multi-packet devices (issue #84 continuous mode)
-                target_device_keys = {
-                    d["device_key"] for d in self.devices
-                    if d["device_key"] in self.local_transports and
-                    (d.get("device_name") in LOCAL_READ_TIMEOUT_OVERRIDES or d.get("product_name") in LOCAL_READ_TIMEOUT_OVERRIDES)
-                }
-
-                if target_device_keys and self._running:
-                    # Dynamically scale back max_wait on fast custom polling rates to prevent overlapping cycles
-                    max_wait = min(45, poll_interval - 5) if poll_interval > 5 else 45
-                    check_interval = 5
-                    retry_elapsed = 0
-                    last_retry_time = 0
-
-                    while retry_elapsed < max_wait and self._running:
-                        incomplete = [
-                            dk for dk in target_device_keys
-                            if not self._has_telemetry_fields(self.latest_data.get(dk, {}))
-                        ]
-
-                        if not incomplete:
-                            break
-
-                        # Re-request state for unpopulated devices every 10 seconds
-                        if retry_elapsed - last_request_time >= 10:
-                            incomplete = [
-                                dk for dk in target_device_keys
-                                if not self._has_telemetry_fields(self.latest_data.get(dk, {}))
-                            ]
-                            if not incomplete:
-                                break
-                            log.debug(
-                                "Continuous mode: retrying status request for incomplete multi-packet devices: %s (%ds/%ds)",
-                                ", ".join(incomplete), retry_elapsed, max_wait
-                            )
-                            self._request_status()
-                            last_request_time = retry_elapsed
-
-                        time.sleep(check_interval)
-                        retry_elapsed += check_interval
         except KeyboardInterrupt:
             log.info("Shutting down...")
         finally:
