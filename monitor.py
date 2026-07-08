@@ -1055,7 +1055,7 @@ class PecronMonitor:
                             )
                             return True
                     except Exception as e:
-                    log.warning("TCP control failed: %s", e)
+                        log.warning("TCP control failed: %s", e)
 
         # Fall back to cloud transports
         # Fix: Route non-boolean configurations (ENUM/INT) straight to REST API (issue #84)
